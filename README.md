@@ -14,6 +14,15 @@ FluxDown-plugin 是用于管理个人 FluxDown 插件的仓库。每个插件以
 ```text
 FluxDown-plugin/
 ├── README.md
+├── anime-archive/
+│   ├── README.md
+│   ├── manifest.json
+│   ├── parser.js
+│   ├── archive.js
+│   ├── main.js
+│   ├── build.mjs
+│   └── scripts/
+│       └── parser.test.mjs
 └── bilibili-bangumi/
     ├── README.md
     ├── manifest.json
@@ -40,6 +49,7 @@ FluxDown-plugin/
 
 | 插件 | FluxDown identity | 版本 | 功能 |
 | --- | --- | --- | --- |
+| [anime-archive](./anime-archive/) | `fluxdown@anime-archive` | `1.0.0` | 本地按视频文件名识别番剧名并归档到统一标题目录；需要实现 `contributes.archive` 的 FD 主机构建（新能力尚未随正式版发布） |
 | [bilibili-bangumi](./bilibili-bangumi/) | `fluxdown@bilibili-bangumi` | `1.1.1` | 解析番剧、普通视频及短链；番剧和 UP 主订阅共用插件设置；可移植二维码登录及登录态恢复（FD ≥ 0.6.4） |
 
 ## 插件包格式
@@ -77,6 +87,7 @@ plugin.fxplug
 - `minAppVersion`：最低 FluxDown 版本；
 - `resolvers`：链接匹配规则、入口文件和解析超时时间；
 - `subscriptions`：订阅 provider ID、入口文件和订阅超时时间；
+- `contributes.archive`：文件名归档回调（需 `archive` 权限；只在 FD 自有分类目录规则匹配后选择单层子目录）；
 - `settings`：插件可配置的设置项。
 
 插件入口应通过 FluxDown 插件运行时提供的能力完成网络请求、存储和结果返回，不应依赖宿主客户端内部文件路径或未声明的接口。
