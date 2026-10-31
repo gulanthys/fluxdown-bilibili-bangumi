@@ -18,20 +18,14 @@ function harness(settings = {}) {
   return context;
 }
 
-test('empty source config keeps bangumi all qualities and uploader best-only default', () => {
-  const c = harness();
-  assert.deepEqual(Array.from(c.subscriptionQualityCandidates({}, 'x', false, 'best'), x => x.qualityId), [120, 80, 64, 32]);
-  assert.equal(c.subscriptionOptions({ providerConfig: '{}' }, 'uploader').highestQualityOnly, true);
-  assert.equal(c.subscriptionOptions({ providerConfig: '' }, 'bangumi').limit, 50);
-  assert.equal(harness({ quality: 'audio' }).subscriptionOptions({ providerConfig: '{}' }, 'bangumi').quality, 'best');
-});
-
-test('source options override settings without mutating global settings', () => {
-  const settings = { quality: '720', includeExtras: false, highestQualityOnly: true, limit: 8 };
-  const c = harness(settings);
-  const options = c.subscriptionOptions({ providerConfig: JSON.stringify({ quality: '1080', includeExtras: true, highestQualityOnly: false, limit: 3 }) }, 'bangumi');
-  assert.deepEqual(JSON.parse(JSON.stringify(options)), { quality: '1080', includeExtras: true, highestQualityOnly: false, limit: 3 });
-  assert.deepEqual(settings, { quality: '720', includeExtras: false, highestQualityOnly: true, limit: 8 });
+test('both subscription kinds use the plugin-wide quality and filtering settings', () => {
+  const c = harness({ quality: '720', includeExtras: true, highestQualityOnly: true });
+  for (const kind of ['bangumi', 'uploader']) {
+    const options = c.subscriptionOptions(kind);
+    const candidates = c.subscriptionQualityCandidates({}, 'video', options.highestQualityOnly, options.quality);
+    assert.deepEqual(Array.from(candidates, variant => variant.height), [720]);
+    assert.equal(options.includeExtras, true);
+  }
 });
 
 test('quality ceiling chooses one variant at or below the requested height', () => {
@@ -40,17 +34,38 @@ test('quality ceiling chooses one variant at or below the requested height', () 
   assert.deepEqual(Array.from(c.subscriptionQualityCandidates({}, 'x', false, '480'), x => x.height), [480]);
 });
 
-test('invalid config objects, types, quality and limits fail explicitly', () => {
-  const c = harness();
-  for (const providerConfig of [[], 'bad', 'null', '[]', '"text"']) assert.throws(() => c.subscriptionOptions({ providerConfig }, 'bangumi'));
-  for (const config of [{ quality: 'audio' }, { quality: 1080 }, { includeExtras: 1 }, { highestQualityOnly: 'true' }, { limit: 0 }, { limit: 51 }, { limit: 1.5 }]) {
-    assert.throws(() => c.subscriptionOptions({ providerConfig: JSON.stringify(config) }, 'bangumi'));
-  }
-  for (const config of [{ limit: 31 }, { limit: '20' }]) assert.throws(() => c.subscriptionOptions({ providerConfig: JSON.stringify(config) }, 'uploader'));
-});
 
 test('episode quality identifiers remain deterministic and distinct', () => {
   const c = harness();
   const ids = Array.from(c.subscriptionQualityCandidates({}, 'x', false, 'best'), x => 'ep:123@q:' + x.qualityId);
   assert.deepEqual(ids, ['ep:123@q:120', 'ep:123@q:80', 'ep:123@q:64', 'ep:123@q:32']);
+});
+
+test('saved source overrides cannot supersede changed plugin settings', async () => {
+  const settings = { quality: '720', includeExtras: true, highestQualityOnly: true };
+  const c = harness(settings);
+  Object.assign(c, {
+    effectiveCookie: async () => '',
+    seasonIdFromUrl: async () => '123',
+    apiGet: async path => path.startsWith('/pgc/view/') ? {
+      title: 'Series', episodes: [{ id: 1 }],
+      section: [{ title: 'Extras', episodes: [{ id: 2 }] }],
+    } : {},
+    sanitizeFileName: text => text,
+    filterBangumiEpisodes: episodes => episodes,
+    episodeDisplayName: (_series, id) => 'Episode ' + id,
+    playerPlayUrl: () => '/play',
+    episodePageUrl: id => 'https://www.bilibili.com/bangumi/play/ep' + id,
+    episodePubDate: () => '',
+    pluginLog: () => {},
+  });
+  const request = {
+    url: 'https://www.bilibili.com/bangumi/play/ss123',
+    providerConfig: '{"quality":"2160","includeExtras":false,"highestQualityOnly":false,"limit":1}',
+  };
+  const first = await c.subscribeBangumi(request);
+  assert.deepEqual(Array.from(first.items, item => item.resolverItem), ['ep:1@q:64', 'ep:2@q:64']);
+  settings.quality = '480';
+  const second = await c.subscribeBangumi({ ...request, providerConfig: 'obsolete non-JSON config' });
+  assert.deepEqual(Array.from(second.items, item => item.resolverItem), ['ep:1@q:32', 'ep:2@q:32']);
 });

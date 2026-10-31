@@ -40,7 +40,7 @@ FluxDown-plugin/
 
 | 插件 | FluxDown identity | 版本 | 功能 |
 | --- | --- | --- | --- |
-| [bilibili-bangumi](./bilibili-bangumi/) | `fluxdown@bilibili-bangumi` | `1.1.0` | 解析番剧、普通视频及短链；番剧和 UP 主订阅独立配置；可移植二维码登录及登录态恢复（FD ≥ 0.6.4） |
+| [bilibili-bangumi](./bilibili-bangumi/) | `fluxdown@bilibili-bangumi` | `1.1.1` | 解析番剧、普通视频及短链；番剧和 UP 主订阅共用插件设置；可移植二维码登录及登录态恢复（FD ≥ 0.6.4） |
 
 ## 插件包格式
 

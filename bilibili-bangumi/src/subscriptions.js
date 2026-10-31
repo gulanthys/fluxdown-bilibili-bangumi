@@ -1,39 +1,22 @@
 // 订阅轮询会直接为条目建任务，单次只解析最近一批分集，避免长篇番剧或大量番外
 // 让一次订阅调用超过宿主的墙钟预算。核心会保留已知 guid，后续轮询继续尝试最新分集。
-function subscriptionOptions(ctx, kind) {
-  var config = ctx && ctx.providerConfig;
-  if (config == null || config === '') config = {};
-  if (typeof config === 'string') {
-    try { config = config.trim() ? JSON.parse(config) : {}; } catch (e) { throw new Error('订阅 providerConfig 必须是合法 JSON 对象'); }
+function subscriptionOptions(kind) {
+  var quality = setting('quality', 'best');
+  if (quality === 'audio') quality = 'best';
+  if (typeof quality !== 'string' || !/^(best|2160|1440|1080|720|480)$/.test(quality)) {
+    throw new Error('插件默认画质必须是 best、2160、1440、1080、720 或 480');
   }
-  if (typeof config !== 'object' || Array.isArray(config) || config === null) throw new Error('订阅 providerConfig 必须是对象');
-  var defaultQuality = kind === 'uploader' ? 'best' : setting('quality', 'best');
-  if (defaultQuality === 'audio') defaultQuality = 'best';
-  var defaults = {
-    quality: defaultQuality,
-    includeExtras: setting('includeExtras', false),
-    highestQualityOnly: kind === 'uploader' ? true : setting('highestQualityOnly', false),
-    limit: setting('limit', kind === 'uploader' ? 20 : MAX_SUBSCRIPTION_EPISODES),
+  var includeExtras = setting('includeExtras', false);
+  var highestQualityOnly = setting('highestQualityOnly', false);
+  if (typeof includeExtras !== 'boolean' || typeof highestQualityOnly !== 'boolean') {
+    throw new Error('插件的番外和最高画质设置必须是 boolean');
+  }
+  return {
+    quality: quality,
+    includeExtras: includeExtras,
+    highestQualityOnly: highestQualityOnly,
+    limit: kind === 'uploader' ? 20 : MAX_SUBSCRIPTION_EPISODES,
   };
-  var options = {};
-  var keys = ['quality', 'includeExtras', 'highestQualityOnly', 'limit'];
-  for (var i = 0; i < keys.length; i++) {
-    var key = keys[i];
-    var value = Object.prototype.hasOwnProperty.call(config, key) ? config[key] : defaults[key];
-    if (key === 'quality') {
-      if (typeof value !== 'string' || !/^(best|2160|1440|1080|720|480)$/.test(value)) {
-        throw new Error('订阅 quality 必须是 best、2160、1440、1080、720 或 480（暂不支持 audio）');
-      }
-    } else if (key === 'includeExtras' || key === 'highestQualityOnly') {
-      if (typeof value !== 'boolean') throw new Error('订阅 ' + key + ' 必须是 boolean');
-    } else {
-      var max = kind === 'uploader' ? 30 : 50;
-      var min = 1;
-      if (!Number.isInteger(value) || value < min || value > max) throw new Error('订阅 limit 必须是 ' + min + '..' + max + ' 的整数');
-    }
-    options[key] = value;
-  }
-  return options;
 }
 
 function subscriptionQualityCandidates(play, title, highestQualityOnly, quality) {
@@ -160,7 +143,7 @@ async function subscribeUploader(ctx) {
   var infoResult = await apiGetWbi(uploaderInfoPath(), { mid: mid }, ctx, cookie);
   var info = infoResult && infoResult.card ? infoResult.card : infoResult;
   var uploaderName = sanitizeFileName(String((info && (info.name || info.uname)) || ('UP主 ' + mid)));
-  var options = subscriptionOptions(ctx, 'uploader');
+  var options = subscriptionOptions('uploader');
   var videos = await listUploaderVideos(mid, ctx, cookie, options.limit);
   if (!videos.length) throw new Error('Bilibili 未返回可订阅的普通投稿视频');
   var items = [];
@@ -251,7 +234,7 @@ async function resolveUploaderVideo(ctx) {
 }
 
 async function subscribeBangumi(ctx) {
-  var options = subscriptionOptions(ctx, 'bangumi');
+  var options = subscriptionOptions('bangumi');
 
   var cookie = await effectiveCookie(ctx);
   var seasonId = await seasonIdFromUrl(ctx.url, ctx, cookie);

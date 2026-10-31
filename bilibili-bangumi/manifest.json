@@ -1,7 +1,7 @@
 {
   "identity": "fluxdown@bilibili-bangumi",
   "name": "Bilibili视频下载",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Bilibili 视频插件：支持番剧、UP 主投稿订阅、DASH 解析及二维码登录。",
   "homepage": "https://github.com/gulanthys",
   "minAppVersion": "0.6.4",
@@ -76,7 +76,7 @@
     {
       "key": "includeExtras",
       "title": "包含番外与花絮",
-      "description": "关闭时只列出正片并排除预告；开启后同时列出预告、PV、采访和其他分区。订阅可在 providerConfig 单独覆盖。",
+      "description": "番剧清单与番剧订阅共用：关闭时只列正片并排除预告；开启后同时列出番外、预告、PV、采访等分区。",
       "type": "boolean",
       "widget": "toggle",
       "default": "false"
@@ -84,7 +84,7 @@
     {
       "key": "highestQualityOnly",
       "title": "优先最高画质",
-      "description": "番剧清单每集只展示最高可用画质；订阅可通过 providerConfig 单独覆盖。",
+      "description": "番剧清单及番剧、UP 主订阅共用：每个视频只展示最高可用画质。",
       "type": "boolean",
       "widget": "toggle",
       "default": "false"
@@ -92,7 +92,7 @@
     {
       "key": "quality",
       "title": "默认画质",
-      "description": "普通链接的默认画质；订阅可通过 providerConfig 单独设置画质上限。没有满足上限的画质时会明确报错。",
+      "description": "普通链接的默认画质，同时作为番剧和 UP 主订阅的画质上限。订阅不支持仅音频，选择仅音频时按最佳画质处理。",
       "type": "string",
       "widget": "select",
       "options": [
