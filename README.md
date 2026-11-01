@@ -1,28 +1,18 @@
-# FluxDown-plugins
+# FluxDown Bilibili Bangumi Plugin
 
-FluxDown-plugins 是用于管理个人 FluxDown 插件的仓库。每个插件以独立目录保存实现源码，并可按 FluxDown 插件规范打包成 `.fxplug` 发布包。
+此仓库专门维护 FluxDown 的 Bilibili 插件源码。番剧归档/分类插件由独立仓库 [fluxdown-anime-archive](https://github.com/gulanthys/fluxdown-anime-archive) 维护。
 
-## 仓库目标
+## 插件
 
-- 集中维护自己编写的 FluxDown 插件
-- 让每个插件拥有独立的源码、清单和使用说明
-- 保持插件实现与发布包之间可追溯
-- 后续可统一加入打包、校验、版本管理和插件索引
+| FluxDown identity | 目录 | 版本 | 功能 |
+| --- | --- | --- | --- |
+| `fluxdown@bilibili-bangumi` | [`bilibili-bangumi/`](./bilibili-bangumi/) | `1.1.1` | 解析番剧、普通视频及短链；番剧和 UP 主订阅共用插件设置；可移植二维码登录及登录态恢复（FD ≥ 0.6.4） |
 
 ## 目录结构
 
 ```text
-FluxDown-plugins/
+fluxdown-plugin-bilibili-bangumi/
 ├── README.md
-├── anime-archive/
-│   ├── README.md
-│   ├── manifest.json
-│   ├── parser.js
-│   ├── archive.js
-│   ├── main.js
-│   ├── build.mjs
-│   └── scripts/
-│       └── parser.test.mjs
 └── bilibili-bangumi/
     ├── README.md
     ├── manifest.json
@@ -31,26 +21,6 @@ FluxDown-plugins/
     ├── src/
     └── scripts/
 ```
-
-### 插件目录约定
-
-每个插件使用一个独立目录，目录名建议使用清晰、稳定的短名称。插件目录至少应包含：
-
-```text
-<plugin-name>/
-├── README.md
-├── manifest.json
-└── resolve.js
-```
-
-如果插件有多个入口文件或辅助模块，也放在自己的插件目录中，不要与其他插件共用相同文件。
-
-## 当前插件
-
-| 插件 | FluxDown identity | 版本 | 功能 |
-| --- | --- | --- | --- |
-| [anime-archive](./anime-archive/) | `fluxdown@anime-archive` | `1.0.1` | 本地按视频文件名识别番剧名并归档到统一标题目录；需要实现 `contributes.archive` 的 FD 主机构建（新能力尚未随正式版发布） |
-| [bilibili-bangumi](./bilibili-bangumi/) | `fluxdown@bilibili-bangumi` | `1.1.1` | 解析番剧、普通视频及短链；番剧和 UP 主订阅共用插件设置；可移植二维码登录及登录态恢复（FD ≥ 0.6.4） |
 
 ## 插件包格式
 
