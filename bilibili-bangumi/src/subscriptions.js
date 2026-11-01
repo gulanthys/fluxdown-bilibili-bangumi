@@ -173,6 +173,14 @@ async function subscribeUploader(ctx) {
   if (!items.length) throw new Error('Bilibili 投稿均未返回可下载画质');
   return { title: 'Bilibili UP主 - ' + uploaderName, link: ctx.url, items: items };
 }
+function ordinaryVideoMetadata(ctx) {
+  var metadata = { platform: 'bilibili', mediaKind: 'post' };
+  if (ctx.creatorId) metadata.creatorId = String(ctx.creatorId);
+  if (ctx.creatorName) metadata.creatorName = String(ctx.creatorName);
+  if (ctx.collectionId) metadata.collectionId = String(ctx.collectionId);
+  if (ctx.collectionTitle) metadata.collectionTitle = String(ctx.collectionTitle);
+  return metadata;
+}
 async function resolveVideoPage(ctx) {
   var url = String(ctx.url || '').trim();
   var match = /^https?:\/\/(?:(?:www|m)\.)?bilibili\.com\/video\/(BV[0-9a-z]+|av\d+)\/?(?:[?#]|$)/i.exec(url);
@@ -191,6 +199,10 @@ async function resolveVideoPage(ctx) {
   if (pages.length > 1) title += ' - P' + pageNumber + ' ' + String(page.part || '');
   return await resolveUploaderVideo(Object.assign({}, ctx, {
     title: title,
+    creatorId: String(view.owner && view.owner.mid || ''),
+    creatorName: String(view.owner && view.owner.name || ''),
+    collectionId: String(view.ugc_season && view.ugc_season.id || ''),
+    collectionTitle: String(view.ugc_season && view.ugc_season.title || ''),
     resolverItem: 'video:' + view.bvid + ':cid:' + String(page.cid),
   }));
 }
@@ -203,11 +215,19 @@ async function resolveUploaderVideo(ctx) {
   var requestedQualityId = /^\d+$/.test(qualityKey) ? Number(qualityKey) : 0;
   var play = await apiGet(videoPlayUrl(video, requestedQualityId), ctx, cookie);
   var resolvedTitle = '';
-  if (!ctx.title) {
+  var resolvedView = null;
+  if (!ctx.title || !ctx.creatorId || !ctx.creatorName) {
     try {
-      var view = await apiGet('/x/web-interface/view?bvid=' + encodeURIComponent(video.bvid), ctx, cookie);
-      resolvedTitle = String(view && view.title || '');
+      resolvedView = await apiGet('/x/web-interface/view?bvid=' + encodeURIComponent(video.bvid), ctx, cookie);
+      resolvedTitle = String(resolvedView && resolvedView.title || '');
     } catch (e) {}
+  }
+  var resultContext = Object.assign({}, ctx);
+  if (!resultContext.creatorId && resolvedView && resolvedView.owner) resultContext.creatorId = String(resolvedView.owner.mid || '');
+  if (!resultContext.creatorName && resolvedView && resolvedView.owner) resultContext.creatorName = String(resolvedView.owner.name || '');
+  if (!resultContext.collectionId && resolvedView && resolvedView.ugc_season) {
+    resultContext.collectionId = String(resolvedView.ugc_season.id || '');
+    resultContext.collectionTitle = String(resolvedView.ugc_season.title || '');
   }
   var title = sanitizeFileName(String(ctx.title || resolvedTitle || video.bvid));
   var headers = requestHeaders(cookie, ctx), dash = play.dash || {};
@@ -216,17 +236,17 @@ async function resolveUploaderVideo(ctx) {
   var chosenIndex = qualityKey ? chooseVariantIndex(variants, qualityKey) : chooseDashIndex(variants, String(setting('quality', 'best')));
   if (qualityKey) {
     if (chosenIndex < 0 || !variants[chosenIndex]) throw new Error('Bilibili 未返回所选画质: ' + qualityKey);
-    var fixed = variants[chosenIndex], fixedResult = { url: fixed.url, fileName: fixed.fileName, totalBytes: fixed.totalBytes, extraHeaders: headers, ephemeral: true, rangeSupported: true };
-    if (fixed.audioUrl) fixedResult.audioUrl = fixed.audioUrl;
+    var fixed = variants[chosenIndex];
+    var fixedResult = { url: fixed.url, fileName: fixed.fileName, totalBytes: fixed.totalBytes, extraHeaders: headers, ephemeral: true, rangeSupported: true, archiveMetadata: ordinaryVideoMetadata(resultContext) };
     return fixedResult;
   }
   if (String(setting('quality', 'best')) === 'audio') {
     if (!audio) throw new Error('Bilibili 当前没有独立音频轨');
-    return { url: audioUrl(audio), fileName: title + ' [audio].m4a', totalBytes: streamSize(audio), extraHeaders: headers, ephemeral: true, rangeSupported: true };
+    return { url: audioUrl(audio), fileName: title + ' [audio].m4a', totalBytes: streamSize(audio), extraHeaders: headers, ephemeral: true, rangeSupported: true, archiveMetadata: ordinaryVideoMetadata(resultContext) };
   }
   if (variants.length) {
     var chosen = variants[chosenIndex] || variants[0];
-    var result = { url: chosen.url, fileName: chosen.fileName, totalBytes: chosen.totalBytes, extraHeaders: headers, ephemeral: true, rangeSupported: true, variants: variants, defaultVariantIndex: chosenIndex };
+    var result = { url: chosen.url, fileName: chosen.fileName, totalBytes: chosen.totalBytes, extraHeaders: headers, ephemeral: true, rangeSupported: true, variants: variants, defaultVariantIndex: chosenIndex, archiveMetadata: ordinaryVideoMetadata(resultContext) };
     if (chosen.audioUrl) result.audioUrl = chosen.audioUrl;
     return result;
   }

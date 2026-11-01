@@ -257,7 +257,7 @@ async function resolveManifest(ctx) {
   var items = await collectEpisodes(result, Boolean(setting('includeExtras', false)), ctx, cookie, String(setting('quality', 'best')));
   if (!items.length) throw new Error('Bilibili 未返回可下载分集');
 
-  return { manifest: { name: title, items: items } };
+  return { manifest: { name: title, items: items, archiveMetadata: { platform: 'bilibili', mediaKind: 'series', seriesId: String(result.season_id || seasonId), seriesTitle: String(result.title || result.season_title || title) } } };
 }
 
 async function resolveEpisode(ctx) {
@@ -268,6 +268,12 @@ async function resolveEpisode(ctx) {
   var cookie = await effectiveCookie(ctx);
   var season = await apiGet('/pgc/view/web/season?ep_id=' + encodeURIComponent(epId), ctx, cookie);
   var episode = findEpisode(season, epId);
+  var archiveMetadata = {
+    platform: 'bilibili',
+    mediaKind: 'series',
+    seriesId: String(season.season_id || season.media_id || ''),
+    seriesTitle: String(season.title || season.season_title || ''),
+  };
   // 清单项带有具体画质码时，下载阶段直接请求该 qn；
   // qn=127 只用于列出可选画质，不能保证每次都返回同一条资源。
   var requestedQualityId = /^\d+$/.test(qualityKey) ? Number(qualityKey) : 0;
@@ -300,6 +306,7 @@ async function resolveEpisode(ctx) {
       extraHeaders: headers,
       ephemeral: true,
       rangeSupported: true,
+      archiveMetadata: archiveMetadata,
     };
     if (fixed.audioUrl) fixedResult.audioUrl = fixed.audioUrl;
     return fixedResult;
@@ -314,6 +321,7 @@ async function resolveEpisode(ctx) {
       extraHeaders: headers,
       ephemeral: true,
       rangeSupported: true,
+      archiveMetadata: archiveMetadata,
     };
   }
 
@@ -329,8 +337,8 @@ async function resolveEpisode(ctx) {
       rangeSupported: true,
       variants: variants,
       defaultVariantIndex: chosenIndex,
+      archiveMetadata: archiveMetadata,
     };
-    if (chosen.audioUrl) chosenResult.audioUrl = chosen.audioUrl;
     return chosenResult;
   }
 
@@ -343,6 +351,7 @@ async function resolveEpisode(ctx) {
       extraHeaders: headers,
       ephemeral: true,
       rangeSupported: true,
+      archiveMetadata: archiveMetadata,
     };
   }
   throw new Error('Bilibili 播放接口未返回 DASH 或 FLV 地址');

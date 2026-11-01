@@ -26,6 +26,46 @@ for (const kind of ['episode', 'uploader']) {
     assert.equal(requests.filter(path => path.includes('playurl')).length, 1);
   });
 }
+test('ordinary video page extracts creator and collection metadata from its view response', async () => {
+  const c = runtime();
+  c.apiGet = async path => path.includes('/view?')
+    ? { bvid: 'BVfixture', title: 'Fixture video', owner: { mid: 12345, name: 'Fixture UP' }, ugc_season: { id: 678, title: 'Fixture collection' }, pages: [{ cid: 9 }] }
+    : { dash: { video: [{ id: 80, height: 1080, base_url: 'https://cdn.example/video' }] } };
+  const out = await c.resolveVideoPage({ url: 'https://www.bilibili.com/video/BVfixture' });
+  assert.deepEqual(JSON.parse(JSON.stringify(out.archiveMetadata)), {
+    platform: 'bilibili', mediaKind: 'post', creatorId: '12345', creatorName: 'Fixture UP',
+    collectionId: '678', collectionTitle: 'Fixture collection',
+  });
+});
+
+test('uploader subscription resolver extracts creator metadata from fetched view without supplied context', async () => {
+  const c = runtime();
+  c.apiGet = async path => path.includes('/view?')
+    ? { title: 'Fixture upload', owner: { mid: 4321, name: 'Actual UP' } }
+    : { dash: { video: [{ id: 80, height: 1080, base_url: 'https://cdn.example/video' }] } };
+  const out = await c.resolveUploaderVideo({ resolverItem: 'video:BVfixture:cid:9' });
+  assert.deepEqual(JSON.parse(JSON.stringify(out.archiveMetadata)), {
+    platform: 'bilibili', mediaKind: 'post', creatorId: '4321', creatorName: 'Actual UP',
+  });
+});
+
+test('bangumi manifest carries series metadata from its season response', async () => {
+  const c = runtime();
+  c.seasonIdFromUrl = async () => '42';
+  c.apiGet = async () => ({ season_id: 42, title: 'Fixture Series', episodes: [{ id: 1, title: 'Episode 1' }] });
+  const out = await c.resolveManifest({ url: 'https://www.bilibili.com/bangumi/play/ss42' });
+  assert.deepEqual(JSON.parse(JSON.stringify(out.manifest.archiveMetadata)), { platform: 'bilibili', mediaKind: 'series', seriesId: '42', seriesTitle: 'Fixture Series' });
+});
+test('bangumi episode result keeps series identity from the already fetched season', async () => {
+  const c = runtime();
+  c.apiGet = async path => path.includes('/season?')
+    ? { season_id: 42, title: 'Fixture Series', episodes: [{ id: 1, title: 'Episode 1' }] }
+    : { dash: { video: [{ id: 80, height: 1080, base_url: 'https://cdn.example/video' }] } };
+  const out = await c.resolveEpisode({ resolverItem: 'ep:1' });
+  assert.deepEqual(JSON.parse(JSON.stringify(out.archiveMetadata)), {
+    platform: 'bilibili', mediaKind: 'series', seriesId: '42', seriesTitle: 'Fixture Series',
+  });
+});
 
 test('manifest warns about failed quality enumeration without exposing request errors', async () => {
   const c = runtime();
