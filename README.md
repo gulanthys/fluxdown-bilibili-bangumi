@@ -1,6 +1,6 @@
-# FluxDown-plugin
+# FluxDown-plugins
 
-FluxDown-plugin 是用于管理个人 FluxDown 插件的仓库。每个插件以独立目录保存实现源码，并可按 FluxDown 插件规范打包成 `.fxplug` 发布包。
+FluxDown-plugins 是用于管理个人 FluxDown 插件的仓库。每个插件以独立目录保存实现源码，并可按 FluxDown 插件规范打包成 `.fxplug` 发布包。
 
 ## 仓库目标
 
@@ -12,7 +12,7 @@ FluxDown-plugin 是用于管理个人 FluxDown 插件的仓库。每个插件以
 ## 目录结构
 
 ```text
-FluxDown-plugin/
+FluxDown-plugins/
 ├── README.md
 ├── anime-archive/
 │   ├── README.md
