@@ -11,7 +11,7 @@
 ## 目录结构
 
 ```text
-fluxdown-plugin-bilibili-bangumi/
+fluxdown-bilibili-bangumi/
 ├── README.md
 └── bilibili-bangumi/
     ├── README.md
