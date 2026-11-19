@@ -181,6 +181,9 @@ async function collectEpisodes(result, includeExtras, ctx, cookie, quality) {
       if (!id || seen[id]) continue;
       seen[id] = true;
       episodes.push({
+        epId: id,
+        aid: ep.aid || '',
+        cover: ep.cover || result.cover,
         id: id,
         bvid: ep.bvid || ep.bv_id || '',
         cid: ep.cid || '',
@@ -193,6 +196,16 @@ async function collectEpisodes(result, includeExtras, ctx, cookie, quality) {
     if (episodes.length >= MAX_EPISODES) break;
   }
   disambiguateEpisodeNames(episodes);
+  var mediaParts = episodes.map(function(episode) {
+    return Object.assign({}, episode, { id: 'ep:' + episode.id, title: episode.baseName });
+  });
+  var kinds = ctx ? selectedBiliResources() : [];
+  if (ctx && quality === 'audio') {
+    var audioItems = episodes.map(function(episode) {
+      return { id: 'ep:' + episode.id, name: episode.baseName + ' [audio]', path: episode.path, size: 0, kind: 'file' };
+    });
+    return fitManifestItems(await withBiliResourceItems(ctx, audioItems, mediaParts, cookie, kinds));
+  }
   if (!episodes.length || !ctx) return fitManifestItems(episodes.map(function(episode) {
     return { id: 'ep:' + episode.id, name: episode.baseName, path: episode.path, size: 0, kind: 'file' };
   }));
@@ -238,7 +251,19 @@ async function collectEpisodes(result, includeExtras, ctx, cookie, quality) {
     items = buildEpisodeItems(episodes, bestQualityVariants);
     pluginLog('warn', '[bilibili] manifest quality choices reduced to host limit', { before: originalCount, after: items.length, limit: MAX_EPISODES });
   }
-  return items;
+  if (!kinds.length) return items;
+  // Optional attachments may consume the remaining manifest budget. Keep one
+  // playable video per episode before rejecting an overfull selection.
+  var attachments = await withBiliResourceItems(ctx, [], mediaParts, cookie, kinds);
+  if (items.length + attachments.length > MAX_EPISODES) {
+    items = buildEpisodeItems(episodes, qualityVariants.map(function(variants) {
+      return selectListedQualityVariants(variants || [], true);
+    }));
+  }
+  if (items.length + attachments.length > MAX_EPISODES) {
+    throw new Error('番剧和附加资源超过 FluxDown 单次 1000 项上限；请减少附加资源类型');
+  }
+  return fitManifestItems(items.concat(attachments));
 }
 
 async function resolveManifest(ctx) {
@@ -284,77 +309,7 @@ async function resolveEpisode(ctx) {
   // 清单中的 name 就是最终落盘文件名；番剧名由宿主 manifest 组名承载，
   // 这里不要再重复拼一遍，避免预览名称和下载后的文件名不一致。
   var title = episode ? episodeDisplayName(season, epId, episode) : sanitizeFileName('EP' + epId);
-  // 播放地址可能要求登录态；下载阶段也要带上同一份 Cookie。
-  var headers = requestHeaders(cookie, ctx);
-  var dash = play.dash || {};
-  var videos = Array.isArray(dash.video) ? dash.video : [];
-  var audios = Array.isArray(dash.audio) ? dash.audio : [];
-  var audio = pickAudioTrack(audios);
-  var quality = String(setting('quality', 'best'));
-  var variants = buildVariantsFromPlay(play, title);
-  var chosenIndex = qualityKey ? chooseVariantIndex(variants, qualityKey) : chooseDashIndex(variants, quality);
-
-  if (qualityKey) {
-    if (chosenIndex < 0 || !variants[chosenIndex]) {
-      throw new Error('Bilibili 未返回所选画质: ' + qualityKey);
-    }
-    var fixed = variants[chosenIndex];
-    var fixedResult = {
-      url: fixed.url,
-      fileName: fixed.fileName,
-      totalBytes: fixed.totalBytes,
-      extraHeaders: headers,
-      ephemeral: true,
-      rangeSupported: true,
-      archiveMetadata: archiveMetadata,
-    };
-    if (fixed.audioUrl) fixedResult.audioUrl = fixed.audioUrl;
-    return fixedResult;
-  }
-
-  if (quality === 'audio') {
-    if (!audio) throw new Error('Bilibili 当前返回的是封装视频流，没有独立音频轨，无法仅下载音频');
-    return {
-      url: audioUrl(audio),
-      fileName: title + ' [audio].m4a',
-      totalBytes: streamSize(audio),
-      extraHeaders: headers,
-      ephemeral: true,
-      rangeSupported: true,
-      archiveMetadata: archiveMetadata,
-    };
-  }
-
-  if (variants.length) {
-    var chosen = variants[chosenIndex] || variants[0];
-    if (!chosen.url) throw new Error('Bilibili 播放接口未返回视频地址');
-    var chosenResult = {
-      url: chosen.url,
-      fileName: chosen.fileName,
-      totalBytes: chosen.totalBytes,
-      extraHeaders: headers,
-      ephemeral: true,
-      rangeSupported: true,
-      variants: variants,
-      defaultVariantIndex: chosenIndex,
-      archiveMetadata: archiveMetadata,
-    };
-    return chosenResult;
-  }
-
-  var durl = Array.isArray(play.durl) ? play.durl[0] : play.durl;
-  if (durl && durl.url) {
-    return {
-      url: durl.url,
-      fileName: title + ' [unknown-quality].' + String(play.format || 'flv').toLowerCase(),
-      totalBytes: Number(durl.size) > 0 ? Number(durl.size) : 0,
-      extraHeaders: headers,
-      ephemeral: true,
-      rangeSupported: true,
-      archiveMetadata: archiveMetadata,
-    };
-  }
-  throw new Error('Bilibili 播放接口未返回 DASH 或 FLV 地址');
+  return resolvePlayResult(play, title, qualityKey, requestHeaders(cookie, ctx), archiveMetadata);
 }
 
 function findEpisode(result, epId) {

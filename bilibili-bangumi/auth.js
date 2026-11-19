@@ -171,7 +171,7 @@ function normalizedSite(site) {
 
 function canonicalRef(site) {
   var normalized = normalizedSite(site);
-  return normalized ? 'fluxdown@bilibili-bangumi::' + normalized : '';
+  return normalized ? 'gulanthys@bilibili-bangumi::' + normalized : '';
 }
 
 function normalizeRef(ref) {
@@ -324,6 +324,12 @@ function pendingResult(session, challenge, message, type) {
   };
 }
 
+var BILI_QR_MESSAGES = {
+  scan: '等待扫码确认。',
+  confirm: '已扫描，请在 Bilibili App 确认登录。',
+  expired: '二维码已过期，请重新开始二维码登录。',
+};
+
 async function beginQr(ctx) {
   var result = await request('GET', PASSPORT_BASE + '/x/passport-login/web/qrcode/generate', {});
   if (apiError(result.payload) !== 0 || !result.payload.data) throw new Error(resultError(result.payload));
@@ -345,7 +351,7 @@ async function beginQr(ctx) {
 async function pollQr(session) {
   if (Date.now() - Number(session.createdAt || 0) >= QR_TTL_MS) {
     await clearSession();
-    return { status: 'error', sessionId: '', message: '二维码已过期，请重新开始二维码登录。' };
+    return { status: 'error', sessionId: '', message: BILI_QR_MESSAGES.expired };
   }
   var result = await request('GET', PASSPORT_BASE + '/x/passport-login/web/qrcode/poll?qrcode_key=' + encodeURIComponent(session.qrcodeKey), {
     cookie: session.cookie || '',
@@ -354,11 +360,11 @@ async function pollQr(session) {
   if (code === 86101 || code === 86090) {
     session.cookie = cookiesFromResult(result, session.cookie);
     await saveSession(session);
-    return pendingResult(session, session.challenge, code === 86090 ? '已扫描，请在 Bilibili App 确认登录。' : '等待扫码确认。', 'qrcode');
+    return pendingResult(session, session.challenge, BILI_QR_MESSAGES[code === 86090 ? 'confirm' : 'scan'], 'qrcode');
   }
   if (code === 86038) {
     await clearSession();
-    return { status: 'error', sessionId: '', message: '二维码已过期，请重新开始二维码登录。' };
+    return { status: 'error', sessionId: '', message: BILI_QR_MESSAGES.expired };
   }
   if (code !== 0) throw new Error(resultError(result.payload));
   var cookie = cookiesFromResult(result, session.cookie);

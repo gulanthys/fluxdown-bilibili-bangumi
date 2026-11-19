@@ -1,4 +1,33 @@
 // QR login view. authenticate owns the persisted session; this module only drives it.
+var authViewText = {
+  zh: {
+    successTitle: '扫码登录成功', success: '已登录 Bilibili，后续下载将自动复用登录状态。', again: '重新扫码登录',
+    guide: '使用哔哩哔哩 App 扫码登录', refresh: '刷新二维码', alt: 'Bilibili 登录二维码',
+    waiting: '等待扫码…', scan: BILI_QR_MESSAGES.scan, confirm: BILI_QR_MESSAGES.confirm,
+    expired: BILI_QR_MESSAGES.expired, expiredView: '二维码已失效，请刷新重试。',
+    generate: '无法生成二维码，请点击刷新重试。', qrFail: '二维码生成失败，请刷新重试。',
+    checkFail: '登录检查失败，请刷新二维码重试。', statusFail: '无法检查登录状态，请重试。',
+    concurrent: '已有登录二维码正在使用，请关闭另一个登录窗口后重试。',
+    cleanup: '无法清理登录会话，请重试。'
+  },
+  en: {
+    successTitle: 'QR login successful', success: 'You are signed in to Bilibili. Downloads will reuse this login.', again: 'Scan a new QR code',
+    guide: 'Scan with the Bilibili app to sign in', refresh: 'Refresh QR code', alt: 'Bilibili login QR code',
+    waiting: 'Waiting for QR scan…', scan: 'Waiting for scan confirmation.', confirm: 'Scanned. Confirm the login in the Bilibili app.',
+    expired: 'The QR code expired. Start QR login again.', expiredView: 'The QR code expired. Refresh to try again.',
+    generate: 'Could not generate a QR code. Refresh to try again.', qrFail: 'Could not render the QR code. Refresh to try again.',
+    checkFail: 'Could not check login. Refresh the QR code to try again.', statusFail: 'Could not check login status. Please try again.',
+    concurrent: 'A login QR code is already in use. Close the other login window and try again.',
+    cleanup: 'Could not clean up the login session. Please try again.'
+  }
+};
+
+function authViewStatus(message, fallback) {
+  if (!message) return { key: fallback };
+  var key = Object.keys(BILI_QR_MESSAGES).find(function (key) { return BILI_QR_MESSAGES[key] === message; });
+  return key ? { key: key } : { text: message };
+}
+
 var authViewOwner = null;
 var authViewSequence = 0;
 
@@ -21,7 +50,7 @@ async function authViewCancel(state, sessionId) {
     if (state.sessionId === id) state.sessionId = '';
     return true;
   } catch (error) {
-    state.error = '无法清理登录会话，请重试。';
+    state.error = { key: 'cleanup' };
     return false;
   }
 
@@ -49,7 +78,7 @@ async function authViewBegin(state) {
   try {
     result = await globalThis.authenticate({ action: 'begin', input: '{"mode":"qr"}' });
   } catch (error) {
-    if (!state.closed && authViewOwner === state.owner) state.error = '无法生成二维码，请点击刷新重试。';
+    if (!state.closed && authViewOwner === state.owner) state.error = { key: 'generate' };
     if (state.closed && authViewOwner === state.owner) authViewOwner = null;
     state.busy = false;
     if (!state.closed) state.ctx.refresh();
@@ -68,18 +97,18 @@ async function authViewBegin(state) {
     return;
   }
   if (result.status !== 'pending' || result.challengeType !== 'qrcode' || !result.challenge) {
-    state.error = result.message || '无法生成二维码，请点击刷新重试。';
+    state.error = authViewStatus(result.message, 'generate');
     state.sessionId = result.sessionId || '';
     if (state.sessionId) await authViewCancel(state);
     state.ctx.refresh();
     return;
   }
   state.sessionId = result.sessionId;
-  state.message = '等待扫码…';
+  state.message = { key: 'waiting' };
   try {
     state.qr = qrImage(result.challenge);
   } catch (error) {
-    state.error = '二维码生成失败，请刷新重试。';
+    state.error = { key: 'qrFail' };
     await authViewCancel(state);
     state.ctx.refresh();
     return;
@@ -97,7 +126,7 @@ async function authViewPoll(state) {
     if (state.closed && authViewOwner === state.owner) {
       if (await authViewCancel(state) && authViewOwner === state.owner) authViewOwner = null;
     } else if (authViewOwner === state.owner) {
-      state.error = '登录检查失败，请刷新二维码重试。';
+      state.error = { key: 'checkFail' };
     }
     state.busy = false;
     if (!state.closed) state.ctx.refresh();
@@ -116,10 +145,9 @@ async function authViewPoll(state) {
     return;
   }
   if (result.status === 'error') {
-    var message = result.message || '二维码已失效，请刷新重试。';
-    if (await authViewCancel(state)) state.error = message;
+    if (await authViewCancel(state)) state.error = authViewStatus(result.message, 'expiredView');
   } else if (result.status === 'pending' && result.message) {
-    state.message = result.message;
+    state.message = authViewStatus(result.message, 'waiting');
   }
   state.ctx.refresh();
 }
@@ -127,9 +155,9 @@ async function authViewPoll(state) {
 flux.ui.view('login', {
   async init(ctx) {
     var owner = ++authViewSequence;
-    var state = { ctx: ctx, owner: owner, timer: 0, sessionId: '', qr: '', message: '等待扫码…', error: '', busy: false, closed: false, authenticated: false };
+    var state = { ctx: ctx, owner: owner, timer: 0, sessionId: '', qr: '', message: { key: 'waiting' }, error: '', busy: false, closed: false, authenticated: false };
     if (authViewOwner !== null) {
-      state.error = '已有登录二维码正在使用，请关闭另一个登录窗口后重试。';
+      state.error = { key: 'concurrent' };
       return state;
     }
     authViewOwner = owner;
@@ -140,7 +168,7 @@ flux.ui.view('login', {
         return state;
       }
     } catch (error) {
-      state.error = '无法检查登录状态，请重试。';
+      state.error = { key: 'statusFail' };
       return state;
     }
     await authViewBegin(state);
@@ -149,25 +177,27 @@ flux.ui.view('login', {
     }
     return state;
   },
-  render(state) {
+  render(state, ctx) {
+    function t(key) { return biliText(ctx && ctx.locale, authViewText, key); }
+    function status(message) { return message.key ? t(message.key) : message.text; }
     var h = flux.ui.h;
     if (state.authenticated) {
       return h('stack', { gap: 'md', padding: 'md', align: 'center' },
-        h('heading', { text: '扫码登录成功', level: 2 }),
-        h('text', { text: '已登录 Bilibili，后续下载将自动复用登录状态。', tone: 'success' }),
-        h('button', { text: '重新扫码登录', variant: 'outline' }));
+        h('heading', { text: t('successTitle'), level: 2 }),
+        h('text', { text: t('success'), tone: 'success' }),
+        h('button', { text: t('again'), variant: 'outline' }));
     }
-    var guide = h('text', { text: '使用哔哩哔哩 App 扫码登录', weight: 'medium' });
+    var guide = h('text', { text: t('guide'), weight: 'medium' });
     if (state.error) {
       return h('stack', { gap: 'sm', padding: 'md', align: 'center' },
         guide,
-        h('text', { text: state.error }),
-        h('button', { text: '刷新二维码', variant: 'primary' }));
+        h('text', { text: status(state.error) }),
+        h('button', { text: t('refresh'), variant: 'primary' }));
     }
     return h('stack', { gap: 'sm', padding: 'md', align: 'center', justify: 'center' },
       guide,
-      state.qr ? h('image', { src: state.qr, alt: 'Bilibili 登录二维码', width: 240, height: 240 }) : null,
-      h('text', { text: state.message, tone: 'muted', size: 'sm' }));
+      state.qr ? h('image', { src: state.qr, alt: t('alt'), width: 240, height: 240 }) : null,
+      h('text', { text: status(state.message), tone: 'muted', size: 'sm' }));
   },
   async event(state, ev, ctx) {
     if (ev.type !== 'press' || state.closed) return;
@@ -180,7 +210,7 @@ flux.ui.view('login', {
     state.error = '';
     state.owner = ++authViewSequence;
     if (authViewOwner !== null) {
-      state.error = '已有登录二维码正在使用，请关闭另一个登录窗口后重试。';
+      state.error = { key: 'concurrent' };
       return;
     }
     authViewOwner = state.owner;

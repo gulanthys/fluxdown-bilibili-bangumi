@@ -4,7 +4,8 @@ import vm from 'node:vm';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-const source = readFileSync(fileURLToPath(new URL('../src/auth-view.js', import.meta.url)), 'utf8');
+const pluginSource = path => readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8');
+const source = ['../auth.js', '../src/i18n.js', '../src/auth-view.js'].map(pluginSource).join('\n');
 
 function runtime(authenticate, savedStatus = { status: 'error' }) {
   const definitions = new Map();
@@ -22,8 +23,9 @@ function runtime(authenticate, savedStatus = { status: 'error' }) {
     },
   };
   const dispatch = arg => arg.action === 'status' ? Promise.resolve(savedStatus) : authenticate(arg);
-  const context = vm.createContext({ flux, globalThis: { authenticate: dispatch }, qrImage: (text) => `data:image/png;base64,${text}` });
+  const context = vm.createContext({ flux, qrImage: (text) => `data:image/png;base64,${text}` });
   vm.runInContext(source, context);
+  context.authenticate = dispatch;
   const definition = definitions.get('login');
   const viewCtx = () => ({ refresh: () => calls.refresh++, close: () => calls.close++ });
   return { definition, timers, calls, viewCtx };
@@ -86,6 +88,24 @@ test('expired QR shows refresh button and refresh starts a new session', async (
   assert.equal(state.qr, 'data:image/png;base64,qr2');
   assert.equal(starts, 2);
   assert.equal(r.timers.size, 1);
+  await r.definition.dispose(state);
+});
+
+test('a language change translates the pending login prompt without restarting the scan', async () => {
+  const actions = [];
+  const confirm = '已扫描，请在 Bilibili App 确认登录。';
+  const r = runtime(async ({ action }) => {
+    actions.push(action);
+    return action === 'poll' ? { ...pending(), message: confirm } : pending();
+  });
+  const state = await r.definition.init(r.viewCtx());
+  await tick(r, state);
+  const zh = r.definition.render(state, { locale: 'zh-CN' });
+  const en = r.definition.render(state, { locale: 'en' });
+  assert.equal(zh.c[2].p.text, confirm);
+  assert.equal(en.c[2].p.text, 'Scanned. Confirm the login in the Bilibili app.');
+  assert.equal(zh.c[1].p.src, en.c[1].p.src);
+  assert.deepEqual(actions, ['begin', 'poll']);
   await r.definition.dispose(state);
 });
 

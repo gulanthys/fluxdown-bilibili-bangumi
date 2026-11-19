@@ -3,7 +3,7 @@ import vm from 'node:vm';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-const source = ['runtime', 'bangumi', 'dash', 'subscriptions', 'entry'].map(name => readFileSync(new URL('../src/' + name + '.js', import.meta.url), 'utf8')).join('\n');
+const source = ['runtime', 'bangumi', 'dash', 'subscriptions', 'resources', 'entry'].map(name => readFileSync(new URL('../src/' + name + '.js', import.meta.url), 'utf8')).join('\n');
 function runtime() {
   const context = vm.createContext({ flux: { settings: {}, storage: { get: async () => null } } });
   vm.runInContext(source, context);
@@ -47,6 +47,54 @@ test('uploader subscription resolver extracts creator metadata from fetched view
   assert.deepEqual(JSON.parse(JSON.stringify(out.archiveMetadata)), {
     platform: 'bilibili', mediaKind: 'post', creatorId: '4321', creatorName: 'Actual UP',
   });
+});
+
+test('ordinary multi-P and UGC collections expose stable selectable children without fetching DASH', async () => {
+  const c = runtime();
+  const view = {
+    bvid: 'BVone', title: 'First', owner: { mid: 8, name: 'Uploader' },
+    pages: [{ cid: 9, part: 'Intro' }, { cid: 10, part: 'Main' }],
+    ugc_season: { id: 11, title: 'Collection', sections: [
+      { title: 'Group one', episodes: [{ bvid: 'BVone', cid: 9, title: 'First' }] },
+      { title: 'Group two', episodes: [
+        { bvid: 'BVtwo', arc: { first_cid: 12, title: 'Other...' } },
+        { bvid: 'BVone', cid: 9, title: 'Repeated' },
+      ] },
+    ] },
+  };
+  const calls = [];
+  c.apiGet = async path => {
+    calls.push(path);
+    return path.includes('/view?') ? view : { dash: { video: [{ id: 80, baseUrl: 'https://cdn.example/video' }] } };
+  };
+  const manifest = (await c.resolveVideoPage({ url: 'https://www.bilibili.com/video/BVone' })).manifest;
+  assert.equal(manifest.name, 'Collection');
+  assert.deepEqual(Array.from(manifest.items, item => [item.id, item.path]), [
+    ['video:BVone:cid:9', 'Group one'], ['video:BVtwo:cid:12', 'Group two'], ['video:BVone:cid:10', ''],
+  ]);
+  assert.equal(manifest.items[1].name, 'Other.mp4');
+  assert.equal(calls.length, 1);
+  const chosen = await c.resolveVideoPage({ url: 'https://www.bilibili.com/video/BVone?p=2' });
+  assert.match(calls.at(-1), /cid=10/);
+  assert.match(chosen.fileName, /P2 Main/);
+  await assert.rejects(c.resolveVideoPage({ url: 'https://www.bilibili.com/video/BVone?p=3' }), /指定分 P/);
+});
+
+test('attachment switches keep video selected alongside only the requested sidecars', async () => {
+  const c = runtime();
+  c.flux.settings.cover = true;
+  c.flux.settings.danmakuXml = true;
+  c.apiGet = async path => {
+    assert.match(path, /\/view\?/);
+    return { bvid: 'BV1nfj86AEAo', title: 'A video', pic: 'http://i0.hdslb.com/bfs/archive/cover.jpg', pages: [{ cid: 14 }] };
+  };
+  const result = await c.resolve({ url: 'https://www.bilibili.com/video/BV1nfj86AEAo' });
+  assert.deepEqual(Array.from(result.manifest.items, item => item.name.slice(item.name.lastIndexOf('.'))), [
+    '.mp4', '.jpg', '.xml',
+  ]);
+  assert.equal(result.manifest.items[0].id, 'video:BV1nfj86AEAo:cid:14');
+  const cover = await c.resolve({ url: 'https://www.bilibili.com/video/BV1nfj86AEAo', resolverItem: result.manifest.items[1].id });
+  assert.equal(cover.url, 'https://i0.hdslb.com/bfs/archive/cover.jpg');
 });
 
 test('bangumi manifest carries series metadata from its season response', async () => {

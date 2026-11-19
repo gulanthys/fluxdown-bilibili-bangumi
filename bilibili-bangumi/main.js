@@ -198,7 +198,7 @@ function normalizedSite(site) {
 
 function canonicalRef(site) {
   var normalized = normalizedSite(site);
-  return normalized ? 'fluxdown@bilibili-bangumi::' + normalized : '';
+  return normalized ? 'gulanthys@bilibili-bangumi::' + normalized : '';
 }
 
 function normalizeRef(ref) {
@@ -351,6 +351,12 @@ function pendingResult(session, challenge, message, type) {
   };
 }
 
+var BILI_QR_MESSAGES = {
+  scan: '等待扫码确认。',
+  confirm: '已扫描，请在 Bilibili App 确认登录。',
+  expired: '二维码已过期，请重新开始二维码登录。',
+};
+
 async function beginQr(ctx) {
   var result = await request('GET', PASSPORT_BASE + '/x/passport-login/web/qrcode/generate', {});
   if (apiError(result.payload) !== 0 || !result.payload.data) throw new Error(resultError(result.payload));
@@ -372,7 +378,7 @@ async function beginQr(ctx) {
 async function pollQr(session) {
   if (Date.now() - Number(session.createdAt || 0) >= QR_TTL_MS) {
     await clearSession();
-    return { status: 'error', sessionId: '', message: '二维码已过期，请重新开始二维码登录。' };
+    return { status: 'error', sessionId: '', message: BILI_QR_MESSAGES.expired };
   }
   var result = await request('GET', PASSPORT_BASE + '/x/passport-login/web/qrcode/poll?qrcode_key=' + encodeURIComponent(session.qrcodeKey), {
     cookie: session.cookie || '',
@@ -381,11 +387,11 @@ async function pollQr(session) {
   if (code === 86101 || code === 86090) {
     session.cookie = cookiesFromResult(result, session.cookie);
     await saveSession(session);
-    return pendingResult(session, session.challenge, code === 86090 ? '已扫描，请在 Bilibili App 确认登录。' : '等待扫码确认。', 'qrcode');
+    return pendingResult(session, session.challenge, BILI_QR_MESSAGES[code === 86090 ? 'confirm' : 'scan'], 'qrcode');
   }
   if (code === 86038) {
     await clearSession();
-    return { status: 'error', sessionId: '', message: '二维码已过期，请重新开始二维码登录。' };
+    return { status: 'error', sessionId: '', message: BILI_QR_MESSAGES.expired };
   }
   if (code !== 0) throw new Error(resultError(result.payload));
   var cookie = cookiesFromResult(result, session.cookie);
@@ -494,7 +500,48 @@ function qrImage(text) {
   return 'data:image/png;base64,' + base64;
 }
 
+// Portable view locales come from render(), not from the daemon or view state.
+function biliLocale(locale) {
+  return /^zh(?:[-_]|$)/i.test(String(locale || '')) ? 'zh' : 'en';
+}
+
+function biliText(locale, catalog, key, params) {
+  var text = catalog[biliLocale(locale)][key] || catalog.en[key];
+  return params ? text.replace(/\{(\w+)\}/g, function (token, name) {
+    return Object.prototype.hasOwnProperty.call(params, name) ? String(params[name]) : token;
+  }) : text;
+}
+
 // QR login view. authenticate owns the persisted session; this module only drives it.
+var authViewText = {
+  zh: {
+    successTitle: '扫码登录成功', success: '已登录 Bilibili，后续下载将自动复用登录状态。', again: '重新扫码登录',
+    guide: '使用哔哩哔哩 App 扫码登录', refresh: '刷新二维码', alt: 'Bilibili 登录二维码',
+    waiting: '等待扫码…', scan: BILI_QR_MESSAGES.scan, confirm: BILI_QR_MESSAGES.confirm,
+    expired: BILI_QR_MESSAGES.expired, expiredView: '二维码已失效，请刷新重试。',
+    generate: '无法生成二维码，请点击刷新重试。', qrFail: '二维码生成失败，请刷新重试。',
+    checkFail: '登录检查失败，请刷新二维码重试。', statusFail: '无法检查登录状态，请重试。',
+    concurrent: '已有登录二维码正在使用，请关闭另一个登录窗口后重试。',
+    cleanup: '无法清理登录会话，请重试。'
+  },
+  en: {
+    successTitle: 'QR login successful', success: 'You are signed in to Bilibili. Downloads will reuse this login.', again: 'Scan a new QR code',
+    guide: 'Scan with the Bilibili app to sign in', refresh: 'Refresh QR code', alt: 'Bilibili login QR code',
+    waiting: 'Waiting for QR scan…', scan: 'Waiting for scan confirmation.', confirm: 'Scanned. Confirm the login in the Bilibili app.',
+    expired: 'The QR code expired. Start QR login again.', expiredView: 'The QR code expired. Refresh to try again.',
+    generate: 'Could not generate a QR code. Refresh to try again.', qrFail: 'Could not render the QR code. Refresh to try again.',
+    checkFail: 'Could not check login. Refresh the QR code to try again.', statusFail: 'Could not check login status. Please try again.',
+    concurrent: 'A login QR code is already in use. Close the other login window and try again.',
+    cleanup: 'Could not clean up the login session. Please try again.'
+  }
+};
+
+function authViewStatus(message, fallback) {
+  if (!message) return { key: fallback };
+  var key = Object.keys(BILI_QR_MESSAGES).find(function (key) { return BILI_QR_MESSAGES[key] === message; });
+  return key ? { key: key } : { text: message };
+}
+
 var authViewOwner = null;
 var authViewSequence = 0;
 
@@ -517,7 +564,7 @@ async function authViewCancel(state, sessionId) {
     if (state.sessionId === id) state.sessionId = '';
     return true;
   } catch (error) {
-    state.error = '无法清理登录会话，请重试。';
+    state.error = { key: 'cleanup' };
     return false;
   }
 
@@ -545,7 +592,7 @@ async function authViewBegin(state) {
   try {
     result = await globalThis.authenticate({ action: 'begin', input: '{"mode":"qr"}' });
   } catch (error) {
-    if (!state.closed && authViewOwner === state.owner) state.error = '无法生成二维码，请点击刷新重试。';
+    if (!state.closed && authViewOwner === state.owner) state.error = { key: 'generate' };
     if (state.closed && authViewOwner === state.owner) authViewOwner = null;
     state.busy = false;
     if (!state.closed) state.ctx.refresh();
@@ -564,18 +611,18 @@ async function authViewBegin(state) {
     return;
   }
   if (result.status !== 'pending' || result.challengeType !== 'qrcode' || !result.challenge) {
-    state.error = result.message || '无法生成二维码，请点击刷新重试。';
+    state.error = authViewStatus(result.message, 'generate');
     state.sessionId = result.sessionId || '';
     if (state.sessionId) await authViewCancel(state);
     state.ctx.refresh();
     return;
   }
   state.sessionId = result.sessionId;
-  state.message = '等待扫码…';
+  state.message = { key: 'waiting' };
   try {
     state.qr = qrImage(result.challenge);
   } catch (error) {
-    state.error = '二维码生成失败，请刷新重试。';
+    state.error = { key: 'qrFail' };
     await authViewCancel(state);
     state.ctx.refresh();
     return;
@@ -593,7 +640,7 @@ async function authViewPoll(state) {
     if (state.closed && authViewOwner === state.owner) {
       if (await authViewCancel(state) && authViewOwner === state.owner) authViewOwner = null;
     } else if (authViewOwner === state.owner) {
-      state.error = '登录检查失败，请刷新二维码重试。';
+      state.error = { key: 'checkFail' };
     }
     state.busy = false;
     if (!state.closed) state.ctx.refresh();
@@ -612,10 +659,9 @@ async function authViewPoll(state) {
     return;
   }
   if (result.status === 'error') {
-    var message = result.message || '二维码已失效，请刷新重试。';
-    if (await authViewCancel(state)) state.error = message;
+    if (await authViewCancel(state)) state.error = authViewStatus(result.message, 'expiredView');
   } else if (result.status === 'pending' && result.message) {
-    state.message = result.message;
+    state.message = authViewStatus(result.message, 'waiting');
   }
   state.ctx.refresh();
 }
@@ -623,9 +669,9 @@ async function authViewPoll(state) {
 flux.ui.view('login', {
   async init(ctx) {
     var owner = ++authViewSequence;
-    var state = { ctx: ctx, owner: owner, timer: 0, sessionId: '', qr: '', message: '等待扫码…', error: '', busy: false, closed: false, authenticated: false };
+    var state = { ctx: ctx, owner: owner, timer: 0, sessionId: '', qr: '', message: { key: 'waiting' }, error: '', busy: false, closed: false, authenticated: false };
     if (authViewOwner !== null) {
-      state.error = '已有登录二维码正在使用，请关闭另一个登录窗口后重试。';
+      state.error = { key: 'concurrent' };
       return state;
     }
     authViewOwner = owner;
@@ -636,7 +682,7 @@ flux.ui.view('login', {
         return state;
       }
     } catch (error) {
-      state.error = '无法检查登录状态，请重试。';
+      state.error = { key: 'statusFail' };
       return state;
     }
     await authViewBegin(state);
@@ -645,25 +691,27 @@ flux.ui.view('login', {
     }
     return state;
   },
-  render(state) {
+  render(state, ctx) {
+    function t(key) { return biliText(ctx && ctx.locale, authViewText, key); }
+    function status(message) { return message.key ? t(message.key) : message.text; }
     var h = flux.ui.h;
     if (state.authenticated) {
       return h('stack', { gap: 'md', padding: 'md', align: 'center' },
-        h('heading', { text: '扫码登录成功', level: 2 }),
-        h('text', { text: '已登录 Bilibili，后续下载将自动复用登录状态。', tone: 'success' }),
-        h('button', { text: '重新扫码登录', variant: 'outline' }));
+        h('heading', { text: t('successTitle'), level: 2 }),
+        h('text', { text: t('success'), tone: 'success' }),
+        h('button', { text: t('again'), variant: 'outline' }));
     }
-    var guide = h('text', { text: '使用哔哩哔哩 App 扫码登录', weight: 'medium' });
+    var guide = h('text', { text: t('guide'), weight: 'medium' });
     if (state.error) {
       return h('stack', { gap: 'sm', padding: 'md', align: 'center' },
         guide,
-        h('text', { text: state.error }),
-        h('button', { text: '刷新二维码', variant: 'primary' }));
+        h('text', { text: status(state.error) }),
+        h('button', { text: t('refresh'), variant: 'primary' }));
     }
     return h('stack', { gap: 'sm', padding: 'md', align: 'center', justify: 'center' },
       guide,
-      state.qr ? h('image', { src: state.qr, alt: 'Bilibili 登录二维码', width: 240, height: 240 }) : null,
-      h('text', { text: state.message, tone: 'muted', size: 'sm' }));
+      state.qr ? h('image', { src: state.qr, alt: t('alt'), width: 240, height: 240 }) : null,
+      h('text', { text: status(state.message), tone: 'muted', size: 'sm' }));
   },
   async event(state, ev, ctx) {
     if (ev.type !== 'press' || state.closed) return;
@@ -676,7 +724,7 @@ flux.ui.view('login', {
     state.error = '';
     state.owner = ++authViewSequence;
     if (authViewOwner !== null) {
-      state.error = '已有登录二维码正在使用，请关闭另一个登录窗口后重试。';
+      state.error = { key: 'concurrent' };
       return;
     }
     authViewOwner = state.owner;
@@ -689,3 +737,996 @@ flux.ui.view('login', {
     await authViewStop(state);
   },
 });
+
+;(function () {
+// FluxDown 独立 Bilibili 番剧插件。
+//
+// 两段式 resolver：
+//   1. 番剧 season/media 链接 → 调 B 站番剧接口，返回正片/番外分集 manifest；
+//   2. manifest 条目启动时 → 用 resolverItem(ep:<id>) 调 B 站播放接口取得 DASH
+//      视频/音频短期直链，再交回 FluxDown 下载引擎。
+//
+// 追番与 UP 主更新由 FluxDown 的 subscribe 契约调度；插件只负责返回有限批次，
+// 不创建后台定时器或直接建下载任务。
+
+var API_BASE = 'https://api.bilibili.com';
+var USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+  '(KHTML, like Gecko) Chrome/131.0 Safari/537.36';
+var MAX_EPISODES = 1000;
+var MAX_VARIANTS = 16;
+var BFE_ID_KEY = 'auth.bfe_id';
+var MAX_MANIFEST_PATH_CHARS = 180;
+// bili32 使用通用播放器接口时携带的 session 参数；番剧分集也能通过
+// bvid + cid 走同一接口，并返回完整的 DASH 画质列表。
+var PLAYER_SESSION = '68191c1dc3c75042c6f35fba895d65b0';
+
+// DASH 返回的 height 通常存在，但部分接口/账号组合只返回画质码 id。
+// 这些是 Bilibili Web 播放接口常见的画质码，作为 height 缺失时的回退。
+var QUALITY_HEIGHT_BY_ID = {
+  127: 4320, // 8K
+  126: 1080, // 杜比视界
+  125: 1080, // HDR
+  120: 2160, // 4K
+  116: 1080, // 1080P 60帧
+  112: 1080, // 1080P+
+  80: 1080,
+  74: 720,
+  64: 720,
+  32: 480,
+  16: 360,
+};
+
+function setting(name, fallback) {
+  var value = flux.settings[name];
+  return value == null ? fallback : value;
+}
+function pluginLog(level) {
+  try {
+    var logger = flux && flux.logger;
+    if (!logger || typeof logger[level] !== 'function') return;
+    var args = Array.prototype.slice.call(arguments, 1);
+    logger[level].apply(logger, args);
+  } catch (e) {}
+}
+
+function playQualityDiagnostics(play) {
+  var value = play || {};
+  var dash = value.dash && typeof value.dash === 'object' ? value.dash : {};
+  var videos = Array.isArray(dash.video) ? dash.video : [];
+  var formats = Array.isArray(value.support_formats) ? value.support_formats : [];
+  var quality = Array.isArray(value.accept_quality) ? value.accept_quality.map(function(item) { return Number(item) || item; }) : [];
+  var heights = videos.map(function(video) {
+    return { id: Number(video && (video.id || video.quality)) || 0, height: Number(video && (video.height || video.height_cm)) || 0, width: Number(video && video.width) || 0, codec: String(video && (video.codecs || video.codecs_name) || '') };
+  }).filter(function(item) { return item.id || item.height; });
+  heights.sort(function(a, b) { return b.height - a.height || b.id - a.id; });
+  return {
+    acceptQuality: quality,
+    supportFormats: formats.map(function(item) { return { quality: Number(item && (item.quality || item.quality_id)) || 0, format: String(item && (item.format || item.new_description || item.display_desc) || '') }; }),
+    dashVideo: heights.slice(0, 16),
+    dashMaxHeight: heights.reduce(function(max, item) { return Math.max(max, item.height); }, 0),
+    durlQuality: Number(value.quality) || 0
+  };
+}
+
+function logAuthDiagnostics(source, cookie, payload) {
+  var data = payload && payload.data ? payload.data : {};
+  pluginLog('info', '[bilibili] auth diagnostics', { source: source, hasSessdata: cookieContains(cookie, 'SESSDATA'), isLogin: data.isLogin === true, hasWbiImage: Boolean(data.wbi_img && data.wbi_img.img_url && data.wbi_img.sub_url) });
+}
+
+function truncateCodePoints(value, maxLength) {
+  return Array.from(String(value || '')).slice(0, Math.max(0, maxLength)).join('');
+}
+
+function sanitizeFileName(name) {
+  return truncateCodePoints((name || 'video')
+    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, ' ')
+    .replace(/\.{2,}/g, '.')
+    .replace(/\s+/g, ' ')
+    .trim(), 120).replace(/[.\s]+$/, '') || 'video';
+}
+
+function sanitizePath(name) {
+  var value = sanitizeFileName(name).replace(/[.]/g, ' ');
+  return truncateCodePoints(value, 80).trim();
+}
+
+
+function fitManifestItems(items) {
+  var usedNames = Object.create(null);
+  return items.map(function(item) {
+    var path = String(item.path || '');
+    var pathLength = Array.from(path).length;
+    var nameBudget = MAX_MANIFEST_PATH_CHARS - pathLength - (path ? 1 : 0);
+    if (nameBudget < 1) throw new Error('番剧目录名超过 FluxDown 清单路径长度上限');
+    var rawName = String(item.name || 'video');
+    var dot = rawName.lastIndexOf('.');
+    var extension = dot > 0 ? rawName.slice(dot) : '';
+    if (Array.from(extension).length >= nameBudget) throw new Error('番剧文件扩展名超过 FluxDown 清单路径长度上限');
+    var stem = extension ? rawName.slice(0, dot) : rawName;
+    var pathKey = path.toLowerCase();
+    if (!usedNames[pathKey]) usedNames[pathKey] = Object.create(null);
+    var names = usedNames[pathKey];
+    var candidate = '';
+    for (var duplicate = 1; duplicate <= 10000; duplicate++) {
+      var suffix = duplicate === 1 ? '' : ' (' + duplicate + ')';
+      var stemBudget = nameBudget - Array.from(extension + suffix).length;
+      if (stemBudget < 1) throw new Error('同目录中的番剧文件名无法唯一化');
+      candidate = (truncateCodePoints(stem, stemBudget).replace(/[.\s]+$/, '') || 'v') + suffix + extension;
+      if (!names[candidate.toLowerCase()]) break;
+      candidate = '';
+    }
+    if (!candidate) throw new Error('同目录中的番剧文件名数量超过上限');
+    names[candidate.toLowerCase()] = true;
+    return Object.assign({}, item, { name: candidate });
+  });
+}
+
+
+function cookieHeaderFromNetscape(raw) {
+  var lines = String(raw || '').split(/\r?\n/);
+  var pairs = [];
+  var now = Math.floor(Date.now() / 1000);
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i].trim();
+    if (!line) continue;
+    // Netscape 导出会用 #HttpOnly_ 前缀标识 HttpOnly cookie；它不是注释。
+    if (line.indexOf('#HttpOnly_') === 0) line = line.slice('#HttpOnly_'.length);
+    else if (line[0] === '#') continue;
+    var fields = line.split('\t');
+    if (fields.length < 7 || !fields[5]) continue;
+    var rawDomain = String(fields[0] || '').toLowerCase();
+    var domain = rawDomain.replace(/^\./, '');
+    var apiHost = 'api.bilibili.com';
+    var includeSubdomains = String(fields[1]).toUpperCase() === 'TRUE';
+    var belongsToBilibili = domain === 'bilibili.com' || domain.endsWith('.bilibili.com');
+    var domainMatches = belongsToBilibili && (domain === apiHost || (includeSubdomains && apiHost.endsWith('.' + domain)));
+    var cookiePath = String(fields[2] || '/');
+    var secure = String(fields[3]).toUpperCase() === 'TRUE';
+    var expires = Number(fields[4]) || 0;
+    if (!domainMatches || cookiePath !== '/' || (secure && !API_BASE.startsWith('https://')) || (expires > 0 && expires <= now)) continue;
+    pairs.push(fields[5] + '=' + fields.slice(6).join('\t'));
+  }
+  return pairs.join('; ');
+}
+
+function cookieHeader(raw) {
+  var value = String(raw || '').trim();
+  if (!value) return '';
+  if (/^#\s*(Netscape|HTTP Cookie File)/i.test(value) || /\t/.test(value)) {
+    return cookieHeaderFromNetscape(value);
+  }
+  return value.replace(/[\r\n]+/g, ' ').trim();
+}
+
+function normalizeSessdataCookie(cookie) {
+  return String(cookie || '').replace(/(^|;\s*)SESSDATA=([^;]*)/i, function(_, prefix, value) {
+    return prefix + 'SESSDATA=' + String(value || '').replace(/,/g, '%2C').replace(/\*/g, '%2A');
+  });
+}
+
+async function cookieFromAuthProfile() {
+  if (!flux.auth || typeof flux.auth.get !== 'function') return '';
+  var apiAuthRef = 'gulanthys@bilibili-bangumi::https://api.bilibili.com';
+  try {
+    var raw = await flux.storage.get('auth.refs');
+    var parsed = raw ? JSON.parse(raw) : [];
+    if (Array.isArray(parsed)) {
+      var hasApiRef = parsed.some(function(ref) {
+        return String(ref || '').replace('::api.bilibili.com', '::https://api.bilibili.com') === apiAuthRef;
+      });
+      if (parsed.length && !hasApiRef) return '';
+    }
+  } catch (e) {}
+  try {
+    var profile = await flux.auth.get(apiAuthRef);
+    var expiresAt = Number(profile && profile.expiresAt) || 0;
+    if (profile && (!expiresAt || expiresAt > Math.floor(Date.now() / 1000))) {
+      var profileCookie = cookieHeader(profile.cookies || '');
+      if (/(?:^|;\s*)SESSDATA=/i.test(profileCookie)) return profileCookie;
+    }
+  } catch (e) {}
+  return '';
+}
+
+async function effectiveCookie(ctx) {
+  var raw = String((ctx && ctx.cookies) || '').trim();
+  if (!raw) raw = String(setting('cookies', '') || '').trim();
+  var cookie = normalizeSessdataCookie(cookieHeader(raw));
+  if (cookie) return await appendStoredBfeId(cookie);
+  var profileCookie = await cookieFromAuthProfile();
+  return profileCookie ? await appendStoredBfeId(profileCookie) : '';
+}
+
+function cookieContains(cookie, name) {
+  return new RegExp('(?:^|;\\s*)' + String(name).replace(/[.*+?^${}()|[\\]\\]/g, '\\$&') + '=', 'i').test(String(cookie || ''));
+}
+
+async function appendStoredBfeId(cookie) {
+  var value = String(cookie || '').trim();
+  if (!value || cookieContains(value, 'bfe_id')) return value;
+  try {
+    var bfeId = await flux.storage.get(BFE_ID_KEY);
+    if (bfeId) return value + '; bfe_id=' + String(bfeId).trim();
+  } catch (e) {}
+  return value;
+}
+
+
+function responseHeader(response, name) {
+  var headers = response && response.headers ? response.headers : {};
+  var keys = Object.keys(headers);
+  for (var i = 0; i < keys.length; i++) {
+    if (keys[i].toLowerCase() === String(name).toLowerCase()) return String(headers[keys[i]] || '');
+  }
+  return '';
+}
+
+async function rememberResponseBfeId(response) {
+  var setCookie = responseHeader(response, 'set-cookie');
+  var match = /(?:^|[;\\n,]\\s*)bfe_id=([^;\\n,]+)/i.exec(setCookie);
+  if (!match || !match[1]) return;
+  try { await flux.storage.set(BFE_ID_KEY, match[1].trim()); } catch (e) {}
+}
+
+function hasHeader(headers, name) {
+  var target = String(name || '').toLowerCase();
+  var keys = Object.keys(headers || {});
+  for (var i = 0; i < keys.length; i++) {
+    if (keys[i].toLowerCase() === target) return true;
+  }
+  return false;
+}
+
+function requestHeaders(cookie, ctx) {
+  var headers = {
+    Accept: 'application/json, text/plain, */*',
+    Referer: 'https://www.bilibili.com/',
+    'User-Agent': USER_AGENT,
+  };
+  var taskHeaders = ctx && ctx.extraHeaders;
+  if (taskHeaders && typeof taskHeaders === 'object') {
+    var keys = Object.keys(taskHeaders);
+    for (var i = 0; i < keys.length; i++) {
+      if (taskHeaders[keys[i]] != null) headers[keys[i]] = String(taskHeaders[keys[i]]);
+    }
+  }
+  if (ctx && ctx.referrer) headers.Referer = String(ctx.referrer);
+  if (ctx && ctx.userAgent) headers['User-Agent'] = String(ctx.userAgent);
+  if (cookie) headers.Cookie = cookie;
+  return headers;
+}
+
+
+
+async function apiGet(path, ctx, cookie) {
+  var response;
+  try {
+    var requestCookie = cookie || await effectiveCookie(ctx);
+    response = await flux.fetch({
+      method: 'GET',
+      url: API_BASE + path,
+      headers: requestHeaders(requestCookie, ctx),
+    });
+  } catch (e) {
+    throw new Error('Bilibili 接口请求失败: ' + String(e));
+  }
+
+  if (!response || response.status < 200 || response.status >= 300) {
+    throw new Error('Bilibili 接口 HTTP 状态异常: ' + String(response && response.status));
+  }
+
+  var payload;
+  try {
+    payload = JSON.parse(response.body || '');
+  } catch (e) {
+    throw new Error('Bilibili 接口返回非法 JSON: ' + String(e));
+  }
+  if (!payload || Number(payload.code) !== 0) {
+    throw new Error(
+      'Bilibili 接口错误 code=' + String(payload && payload.code) +
+      ': ' + String((payload && payload.message) || 'unknown')
+    );
+  }
+  await rememberResponseBfeId(response);
+  // PGC 接口返回 result，通用播放器接口返回 data。
+  var result = payload.result || payload.data || {};
+  if (/\/playurl(?:\?|$)/.test(path)) {
+    pluginLog('info', '[bilibili] playurl diagnostics', {
+      hasSessdata: cookieContains(requestCookie, 'SESSDATA'),
+      diagnostics: playQualityDiagnostics(result),
+    });
+  }
+  return result;
+}
+
+function md5(input) {
+  function safeAdd(x, y) {
+    var lsw = (x & 65535) + (y & 65535);
+    return (((x >>> 16) + (y >>> 16) + (lsw >>> 16)) << 16) | (lsw & 65535);
+  }
+  function bitRol(num, cnt) { return (num << cnt) | (num >>> (32 - cnt)); }
+  function cmn(q, a, b, x, s, t) { return safeAdd(bitRol(safeAdd(safeAdd(a, q), safeAdd(x, t)), s), b); }
+  function ff(a, b, c, d, x, s, t) { return cmn((b & c) | ((~b) & d), a, b, x, s, t); }
+  function gg(a, b, c, d, x, s, t) { return cmn((b & d) | (c & (~d)), a, b, x, s, t); }
+  function hh(a, b, c, d, x, s, t) { return cmn(b ^ c ^ d, a, b, x, s, t); }
+  function ii(a, b, c, d, x, s, t) { return cmn(c ^ (b | (~d)), a, b, x, s, t); }
+  function words(value) {
+    var bytes = unescape(encodeURIComponent(String(value)));
+    var n = bytes.length, count = ((n + 8) >>> 6) + 1, result = new Array(count * 16);
+    for (var i = 0; i < result.length; i++) result[i] = 0;
+    for (var j = 0; j < n; j++) result[j >> 2] |= bytes.charCodeAt(j) << ((j % 4) * 8);
+    result[n >> 2] |= 0x80 << ((n % 4) * 8);
+    result[count * 16 - 2] = n * 8;
+    return result;
+  }
+  function hex(value) {
+    var table = '0123456789abcdef', out = '';
+    for (var i = 0; i < 4; i++) out += table.charAt((value >>> (i * 8 + 4)) & 15) + table.charAt((value >>> (i * 8)) & 15);
+    return out;
+  }
+  var x = words(input), a = 0x67452301, b = 0xefcdab89, c = 0x98badcfe, d = 0x10325476;
+  for (var i = 0; i < x.length; i += 16) {
+    var oa = a, ob = b, oc = c, od = d;
+    a = ff(a,b,c,d,x[i+0],7,0xd76aa478); d = ff(d,a,b,c,x[i+1],12,0xe8c7b756); c = ff(c,d,a,b,x[i+2],17,0x242070db); b = ff(b,c,d,a,x[i+3],22,0xc1bdceee);
+    a = ff(a,b,c,d,x[i+4],7,0xf57c0faf); d = ff(d,a,b,c,x[i+5],12,0x4787c62a); c = ff(c,d,a,b,x[i+6],17,0xa8304613); b = ff(b,c,d,a,x[i+7],22,0xfd469501);
+    a = ff(a,b,c,d,x[i+8],7,0x698098d8); d = ff(d,a,b,c,x[i+9],12,0x8b44f7af); c = ff(c,d,a,b,x[i+10],17,0xffff5bb1); b = ff(b,c,d,a,x[i+11],22,0x895cd7be);
+    a = ff(a,b,c,d,x[i+12],7,0x6b901122); d = ff(d,a,b,c,x[i+13],12,0xfd987193); c = ff(c,d,a,b,x[i+14],17,0xa679438e); b = ff(b,c,d,a,x[i+15],22,0x49b40821);
+    a = gg(a,b,c,d,x[i+1],5,0xf61e2562); d = gg(d,a,b,c,x[i+6],9,0xc040b340); c = gg(c,d,a,b,x[i+11],14,0x265e5a51); b = gg(b,c,d,a,x[i+0],20,0xe9b6c7aa);
+    a = gg(a,b,c,d,x[i+5],5,0xd62f105d); d = gg(d,a,b,c,x[i+10],9,0x02441453); c = gg(c,d,a,b,x[i+15],14,0xd8a1e681); b = gg(b,c,d,a,x[i+4],20,0xe7d3fbc8);
+    a = gg(a,b,c,d,x[i+9],5,0x21e1cde6); d = gg(d,a,b,c,x[i+14],9,0xc33707d6); c = gg(c,d,a,b,x[i+3],14,0xf4d50d87); b = gg(b,c,d,a,x[i+8],20,0x455a14ed);
+    a = gg(a,b,c,d,x[i+13],5,0xa9e3e905); d = gg(d,a,b,c,x[i+2],9,0xfcefa3f8); c = gg(c,d,a,b,x[i+7],14,0x676f02d9); b = gg(b,c,d,a,x[i+12],20,0x8d2a4c8a);
+    a = hh(a,b,c,d,x[i+5],4,0xfffa3942); d = hh(d,a,b,c,x[i+8],11,0x8771f681); c = hh(c,d,a,b,x[i+11],16,0x6d9d6122); b = hh(b,c,d,a,x[i+14],23,0xfde5380c);
+    a = hh(a,b,c,d,x[i+1],4,0xa4beea44); d = hh(d,a,b,c,x[i+4],11,0x4bdecfa9); c = hh(c,d,a,b,x[i+7],16,0xf6bb4b60); b = hh(b,c,d,a,x[i+10],23,0xbebfbc70);
+    a = hh(a,b,c,d,x[i+13],4,0x289b7ec6); d = hh(d,a,b,c,x[i+0],11,0xeaa127fa); c = hh(c,d,a,b,x[i+3],16,0xd4ef3085); b = hh(b,c,d,a,x[i+6],23,0x04881d05);
+    a = hh(a,b,c,d,x[i+9],4,0xd9d4d039); d = hh(d,a,b,c,x[i+12],11,0xe6db99e5); c = hh(c,d,a,b,x[i+15],16,0x1fa27cf8); b = hh(b,c,d,a,x[i+2],23,0xc4ac5665);
+    a = ii(a,b,c,d,x[i+0],6,0xf4292244); d = ii(d,a,b,c,x[i+7],10,0x432aff97); c = ii(c,d,a,b,x[i+14],15,0xab9423a7); b = ii(b,c,d,a,x[i+5],21,0xfc93a039);
+    a = ii(a,b,c,d,x[i+12],6,0x655b59c3); d = ii(d,a,b,c,x[i+3],10,0x8f0ccc92); c = ii(c,d,a,b,x[i+10],15,0xffeff47d); b = ii(b,c,d,a,x[i+1],21,0x85845dd1);
+    a = ii(a,b,c,d,x[i+8],6,0x6fa87e4f); d = ii(d,a,b,c,x[i+15],10,0xfe2ce6e0); c = ii(c,d,a,b,x[i+6],15,0xa3014314); b = ii(b,c,d,a,x[i+13],21,0x4e0811a1);
+    a = ii(a,b,c,d,x[i+4],6,0xf7537e82); d = ii(d,a,b,c,x[i+11],10,0xbd3af235); c = ii(c,d,a,b,x[i+2],15,0x2ad7d2bb); b = ii(b,c,d,a,x[i+9],21,0xeb86d391);
+    a = safeAdd(a, oa); b = safeAdd(b, ob); c = safeAdd(c, oc); d = safeAdd(d, od);
+  }
+  return hex(a) + hex(b) + hex(c) + hex(d);
+}
+var WBI_CACHE_KEY = 'bilibili.wbi.keys';
+var WBI_MIXIN_KEY_ENC_TAB = [
+  46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35,
+  27, 43, 5, 49, 33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41,
+  13, 37, 48, 7, 16, 24, 55, 40, 61, 26, 17, 0, 1, 60, 51, 30,
+  4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11
+];
+
+function wbiKeyPart(url) {
+  var value = String(url || '').split('?')[0];
+  var slash = value.lastIndexOf('/');
+  var name = slash >= 0 ? value.slice(slash + 1) : value;
+  var dot = name.lastIndexOf('.');
+  return dot > 0 ? name.slice(0, dot) : name;
+}
+
+function wbiMixinKey(imgKey, subKey) {
+  var raw = String(imgKey || '') + String(subKey || ''), out = '';
+  for (var i = 0; i < WBI_MIXIN_KEY_ENC_TAB.length; i++) {
+    if (raw[WBI_MIXIN_KEY_ENC_TAB[i]]) out += raw[WBI_MIXIN_KEY_ENC_TAB[i]];
+  }
+  return out.slice(0, 32);
+}
+
+async function apiGetPayload(path, ctx, cookie) {
+  var response;
+  try {
+    var requestCookie = cookie || await effectiveCookie(ctx);
+    response = await flux.fetch({
+      method: 'GET',
+      url: API_BASE + path,
+      headers: requestHeaders(requestCookie, ctx),
+    });
+  } catch (e) {
+    throw new Error('Bilibili 接口请求失败: ' + String(e));
+  }
+  if (!response || response.status < 200 || response.status >= 300) {
+    throw new Error('Bilibili 接口 HTTP 状态异常: ' + String(response && response.status));
+  }
+  var payload;
+  try { payload = JSON.parse(response.body || ''); } catch (e) {
+    throw new Error('Bilibili 接口返回非法 JSON: ' + String(e));
+  }
+  await rememberResponseBfeId(response);
+  if (/\/x\/web-interface\/nav(?:\?|$)/.test(path)) logAuthDiagnostics('nav', requestCookie, payload);
+  return payload;
+}
+
+async function getWbiKeys(ctx, cookie, forceRefresh) {
+  if (!forceRefresh) {
+    try {
+      var cached = JSON.parse(String(await flux.storage.get(WBI_CACHE_KEY) || 'null'));
+      if (cached && cached.mixinKey && Number(cached.expiresAt) > Date.now()) return cached.mixinKey;
+    } catch (e) {}
+  }
+  var payload = await apiGetPayload('/x/web-interface/nav', ctx, cookie);
+  var image = payload && payload.data && payload.data.wbi_img;
+  var mixinKey = wbiMixinKey(wbiKeyPart(image && image.img_url), wbiKeyPart(image && image.sub_url));
+  if (!mixinKey) throw new Error('Bilibili WBI key 获取失败');
+  try {
+    await flux.storage.set(WBI_CACHE_KEY, JSON.stringify({ mixinKey: mixinKey, expiresAt: Date.now() + 12 * 60 * 60 * 1000 }));
+  } catch (e) {}
+  return mixinKey;
+}
+
+function wbiEncode(value) {
+  return encodeURIComponent(String(value == null ? '' : value)).replace(/[!'()*]/g, '');
+}
+
+async function signedWbiPath(path, params, ctx, cookie, forceRefresh) {
+  var mixinKey = await getWbiKeys(ctx, cookie, forceRefresh);
+  var all = {};
+  var keys = Object.keys(params || {});
+  for (var i = 0; i < keys.length; i++) all[keys[i]] = params[keys[i]];
+  all.wts = Math.floor(Date.now() / 1000);
+  keys = Object.keys(all).sort();
+  var query = [];
+  for (var j = 0; j < keys.length; j++) query.push(wbiEncode(keys[j]) + '=' + wbiEncode(all[keys[j]]));
+  var queryString = query.join('&');
+  return path + '?' + queryString + '&w_rid=' + md5(queryString + mixinKey);
+}
+
+async function apiGetWbi(path, params, ctx, cookie) {
+  var lastError = null;
+  for (var attempt = 0; attempt < 2; attempt++) {
+    try {
+      return await apiGet(await signedWbiPath(path, params, ctx, cookie, attempt > 0), ctx, cookie);
+    } catch (e) {
+      lastError = e;
+      if (attempt === 0 && /code=(-352|-799)/.test(String(e))) {
+        try { await flux.storage.set(WBI_CACHE_KEY, ''); } catch (ignored) {}
+        // Resolver scripts have no global timer; retry the refreshed signature immediately.
+        continue;
+      }
+      break;
+    }
+  }
+  throw lastError || new Error('Bilibili WBI 接口请求失败');
+}
+function htmlAttribute(tag, name) {
+  var match = new RegExp('\\s' + name + '\\s*=\\s*(?:"([^"]*)"|\'([^\']*)\')', 'i').exec(tag);
+  return match ? String(match[1] == null ? match[2] : match[1]).replace(/&amp;/gi, '&') : '';
+}
+
+async function expandBilibiliShortUrl(ctx) {
+  var url = String(ctx.url || '').trim();
+  if (!/^https?:\/\/(?:b23\.tv|bili2233\.cn)\/[a-z0-9]+\/?(?:[?#]|$)/i.test(url)) return ctx;
+  // 宿主自动跟随重定向但不暴露最终 URL；从落地页读取规范链接。
+  // 不转发任务 Cookie、自定义头或认证引用到短链服务。
+  var response = await flux.fetch({
+    method: 'GET',
+    url: url,
+    headers: { 'User-Agent': USER_AGENT, Referer: 'https://www.bilibili.com/' },
+  });
+  if (!response || response.status < 200 || response.status >= 300) {
+    throw new Error('Bilibili 短链展开失败，HTTP 状态: ' + String(response && response.status));
+  }
+  if (response.truncated) throw new Error('Bilibili 短链页面被截断，无法可靠识别目标');
+  var html = String(response.body || '');
+  var tags = html.match(/<(?:link|meta)\b[^>]*>/gi) || [];
+  var target = '';
+  for (var i = 0; i < tags.length; i++) {
+    if (htmlAttribute(tags[i], 'rel').toLowerCase() === 'canonical') {
+      target = htmlAttribute(tags[i], 'href');
+      break;
+    }
+    if (htmlAttribute(tags[i], 'property').toLowerCase() === 'og:url') target = htmlAttribute(tags[i], 'content');
+  }
+  if (!/^https?:\/\/(?:(?:www|m)\.)?bilibili\.com\/(?:video\/(?:BV[0-9a-z]+|av\d+)\/?(?:[?#]|$)|bangumi\/(?:play|media)(?:\/|\?))/i.test(target) &&
+      !/^https?:\/\/space\.bilibili\.com\/\d+\/?(?:[?#]|$)/i.test(target)) {
+    throw new Error('Bilibili 短链未返回支持的页面，可能触发验证码或链接目标不受支持');
+  }
+  if (/\/video\//i.test(target) && /__INITIAL_STATE__\s*=/.test(html)) {
+    var stateMatch = /__INITIAL_STATE__\s*=\s*(\{[\s\S]*?\})\s*;\s*(?:\(function|<\/script>)/.exec(html);
+    if (!stateMatch) throw new Error('Bilibili 短链页面状态无法识别，无法保留分 P');
+    var state = JSON.parse(stateMatch[1]);
+    if (state.p != null) {
+      var page = Number(state.p);
+      if (!Number.isInteger(page) || page < 1) throw new Error('Bilibili 短链页面分 P 非法');
+      target = target.split('#')[0].replace(/([?&])p=[^&]*/i, '$1p=' + page);
+      if (!/[?&]p=/.test(target)) target += (target.indexOf('?') < 0 ? '?' : '&') + 'p=' + page;
+    }
+  }
+  return Object.assign({}, ctx, { url: target });
+}
+
+function firstMatch(url, pattern) {
+  var match = pattern.exec(url || '');
+  return match && match[1] ? match[1] : '';
+}
+
+async function seasonIdFromUrl(url, ctx, cookie) {
+  var seasonId = firstMatch(url, /\/bangumi\/play\/ss(\d+)/i);
+  if (seasonId) return seasonId;
+
+  var mediaId = firstMatch(url, /\/bangumi\/media\/md(\d+)/i);
+  if (mediaId) {
+    var media = await apiGet('/pgc/review/user?media_id=' + encodeURIComponent(mediaId), ctx, cookie);
+    var mediaInfo = media.media || {};
+    if (mediaInfo.season_id) return String(mediaInfo.season_id);
+  }
+
+  var episodeId = firstMatch(url, /\/bangumi\/play\/ep(\d+)/i);
+  if (episodeId) {
+    var episodeResult = await apiGet(
+      '/pgc/view/web/season?ep_id=' + encodeURIComponent(episodeId),
+      ctx,
+      cookie
+    );
+    if (episodeResult.season_id) return String(episodeResult.season_id);
+  }
+
+  var query = /[?&]season_id=(\d+)/i.exec(url || '');
+  return query && query[1] ? query[1] : '';
+}
+
+// Canonicalize common Bilibili links and share text before resolver dispatch.
+function normalizeBiliInput(input) {
+  var text = String(input == null ? '' : input).trim();
+  if (!text) throw biliLibraryError('inputEmpty');
+
+  function fromToken(token) {
+    var match = /^(av|ep|ss)?(0*[1-9]\d*)$/i.exec(token);
+    if (match) {
+      var kind = (match[1] || 'av').toLowerCase();
+      var id = match[2].replace(/^0+/, '');
+      return 'https://www.bilibili.com/' + (kind === 'av' ? 'video/' : 'bangumi/play/') + kind + id;
+    }
+    var bv = /^bv(1[0-9a-z]{9})$/i.exec(token);
+    return bv ? 'https://www.bilibili.com/video/BV' + bv[1] : '';
+  }
+
+  var bare = fromToken(text);
+  if (bare) return bare;
+
+  // Preserve explicit part and season selectors instead of extracting the ID
+  // from inside a URL (which would also trust IDs on unrelated domains).
+  var urls = text.match(/https?:\/\/[^\s<>"'，。；！？）】》]+/gi) || [];
+  for (var i = 0; i < urls.length; i++) {
+    var candidate = urls[i].replace(/[),.!?，。；]+$/g, '');
+    var parsed = /^https?:\/\/([a-z0-9.-]+)(\/[^?#]*)(\?[^#]*)?(?:#.*)?$/i.exec(candidate);
+    if (!parsed) continue;
+    var authority = parsed[1].toLowerCase(), path = parsed[2], query = parsed[3] || '';
+    if (/^(?:b23\.tv|bili2233\.cn)$/.test(authority) && /^\/[a-z0-9]+\/?$/i.test(path)) {
+      return 'https://' + authority + path + query;
+    }
+    if (!/^(?:(?:www|m)\.)?bilibili\.com$/.test(authority)) continue;
+    var video = /^\/video\/(BV1[0-9a-z]{9}|av\d+)\/?$/i.exec(path);
+    if (video) {
+      var page = /[?&]p=([^&]*)/i.exec(query);
+      if (page && (!/^[1-9]\d*$/.test(page[1]) || !Number.isSafeInteger(Number(page[1])))) {
+        throw biliLibraryError('partInvalid');
+      }
+      var target = fromToken(video[1]);
+      if (target) return target + (page ? '?p=' + page[1] : '');
+    }
+    var bangumi = /^\/bangumi\/play\/((?:ep|ss)\d+)\/?$/i.exec(path);
+    if (bangumi && fromToken(bangumi[1])) return fromToken(bangumi[1]);
+    var media = /^\/bangumi\/media\/(md[1-9]\d*)\/?$/i.exec(path);
+    if (media) return 'https://www.bilibili.com/bangumi/media/' + media[1].toLowerCase();
+    var season = /[?&]season_id=([1-9]\d*)(?:&|$)/i.exec(query);
+    if (season && /^\/bangumi\/(?:play|media)\/?$/i.test(path)) return fromToken('ss' + season[1]);
+  }
+  if (!urls.length) {
+    var token = /(?:^|[^A-Za-z0-9])(BV1[0-9A-Za-z]{9}|(?:av|ep|ss)\d+)(?=$|[^A-Za-z0-9])/i.exec(text);
+    if (token && fromToken(token[1])) return fromToken(token[1]);
+  }
+  throw biliLibraryError('inputInvalid');
+}
+
+// Account library browser. runtime.js supplies the authenticated API helpers.
+var biliLibrarySources = ['history', 'favorites', 'likes', 'collections'];
+var biliLibraryStrings = {
+  en: {
+    history: 'Watch history', favorites: 'Favorites', likes: 'Liked videos', collections: 'Creator collections',
+    untitled: 'Untitled video', user: 'Bilibili user', unnamedFolder: 'Unnamed folder', collection: 'Collection', series: 'Series',
+    needsLogin: 'Sign in to Bilibili or configure a cookie first.', invalidLogin: 'Your Bilibili session is no longer valid. Sign in again.',
+    noResults: 'No downloadable videos on this page.', loadError: 'Could not load content: {detail}',
+    created: 'Tasks created: {count}.', failed: 'Failed: {count}. Only failed items will be retried.', deferred: 'Not attempted: {count}. These items are still selected.',
+    submitted: 'Added to the download queue: {url}', submitError: 'Could not add download: {detail}',
+    inputEmpty: 'Enter a Bilibili link or a BV, AV, EP, or SS ID.',
+    partInvalid: 'The Bilibili video part number is invalid.',
+    inputInvalid: 'Unrecognized Bilibili content. Enter a BV, AV, EP, or SS ID, a Bilibili link, or shared text.',
+    submit: 'Add a Bilibili download', placeholder: 'Paste a link or shared text, or enter a BV, AV, EP, or SS ID',
+    queue: 'Add to download queue', title: 'Bilibili library', account: '{name} (UID {uid})', accountRequired: 'Sign in to browse your account content.',
+    creatorInput: 'Creator UID (leave blank to use your own)', findCollections: 'Find collections', prevCollections: 'Previous collections', nextCollections: 'Next collections',
+    loading: 'Loading…', refresh: 'Refresh', historyPager: 'History', page: 'Page {page}', next: 'Next page', reading: 'Loading from Bilibili…',
+    enqueueing: 'Adding tasks…', enqueue: 'Add selected to queue', selection: 'Selected: {count}',
+    queued: 'In download queue', unselect: 'Deselect', select: 'Select', invalidUid: 'The creator UID must be a positive integer.',
+  },
+  zh: {
+    history: '观看历史', favorites: '收藏夹', likes: '点赞视频', collections: 'UP 主合集',
+    untitled: '未命名视频', user: 'Bilibili 用户', unnamedFolder: '未命名收藏夹', collection: '合集', series: '系列',
+    needsLogin: '请先登录 Bilibili 或配置 Cookie。', invalidLogin: 'Bilibili 登录状态无效，请重新登录。',
+    noResults: '此页没有可下载的视频。', loadError: '加载失败：{detail}',
+    created: '已创建 {count} 个任务。', failed: '失败 {count} 个，仅重试失败项。', deferred: '另有 {count} 项未尝试，仍保留在选择中。',
+    submitted: '已加入待下载：{url}', submitError: '添加下载失败：{detail}',
+    inputEmpty: '请输入 Bilibili 链接或 BV / AV / EP / SS 编号。',
+    partInvalid: 'Bilibili 视频分 P 参数非法。',
+    inputInvalid: '无法识别 Bilibili 内容。请输入 BV / AV / EP / SS 编号、Bilibili 链接或分享文案。',
+    submit: '添加 Bilibili 下载', placeholder: '粘贴链接或分享文案，也可输入 BV / AV / EP / SS 编号',
+    queue: '加入待下载', title: 'Bilibili 账户内容', account: '{name}（UID {uid}）', accountRequired: '读取账户内容需要有效登录。',
+    creatorInput: 'UP 主 UID（留空使用当前账号）', findCollections: '查找合集', prevCollections: '上一页合集', nextCollections: '下一页合集',
+    loading: '加载中…', refresh: '刷新', historyPager: '历史游标分页', page: '第 {page} 页', next: '下一页', reading: '正在读取 Bilibili…',
+    enqueueing: '加入中…', enqueue: '将选中项加入下载', selection: '已选 {count} 项',
+    queued: '已加入下载', unselect: '取消选择', select: '选择', invalidUid: 'UP 主 UID 必须是正整数。',
+  },
+};
+
+function biliLibraryError(key) {
+  return Object.assign(new Error(key), { biliKey: key });
+}
+
+function biliLibraryErrorMessage(error, fallback) {
+  return error && error.biliKey
+    ? { key: error.biliKey }
+    : { key: fallback, params: { detail: String(error && error.message || error) } };
+}
+
+function biliLibraryQuery(values) {
+  return Object.keys(values).map(function (key) {
+    return encodeURIComponent(key) + '=' + encodeURIComponent(String(values[key]));
+  }).join('&');
+}
+
+function biliLibraryText(value) {
+  return String(value == null ? '' : value);
+}
+
+function biliLibraryNormalizeVideo(raw, fallback) {
+  var row = raw || {};
+  var bvid = String(row.bvid || row.bv_id || '');
+  var aid = row.aid || row.id || (row.business === 'archive' ? row.oid : '') || '';
+  var epid = row.epid || row.ep_id || (row.business === 'pgc' ? row.oid : '') || '';
+  var url = '';
+  try {
+    if (epid) url = normalizeBiliInput('ep' + epid);
+    else if (bvid) url = normalizeBiliInput(bvid);
+    else if (aid) url = normalizeBiliInput('av' + aid);
+  } catch (error) {}
+  if (!url) return null;
+  var page = Number(row.page);
+  if (/\/video\//.test(url)) url += '?p=' + (Number.isSafeInteger(page) && page > 0 ? page : 1);
+  return {
+    url: url,
+    title: biliLibraryText(row.title || row.name || fallback),
+    owner: biliLibraryText((row.owner && row.owner.name) || (row.upper && row.upper.name) || row.author || ''),
+  };
+}
+
+async function biliLibraryGetUser(state) {
+  var cookie = await effectiveCookie(state.ctx);
+  if (!cookie) throw biliLibraryError('needsLogin');
+  var nav = await apiGet('/x/web-interface/nav', state.ctx, cookie);
+  if (!nav || !nav.isLogin || !(nav.mid || nav.id)) throw biliLibraryError('invalidLogin');
+  state.cookie = cookie;
+  state.uid = String(nav.mid || nav.id);
+  state.accountName = biliLibraryText(nav.uname);
+}
+
+async function biliLibraryFolders(state) {
+  var data = await apiGet('/x/v3/fav/folder/created/list-all?up_mid=' + encodeURIComponent(state.uid), state.ctx, state.cookie);
+  var rows = data && (data.list || data.folders) || [];
+  state.folders = rows.map(function (item) {
+    return { id: String(item.id || item.media_id || ''), title: biliLibraryText(item.title) };
+  }).filter(function (item) { return item.id; });
+  if (!state.folderId || !state.folders.some(function (item) { return item.id === state.folderId; })) {
+    state.folderId = state.folders.length ? state.folders[0].id : '';
+  }
+}
+
+async function biliLibraryCollections(state) {
+  var mid = state.collectionMid || state.uid;
+  var query = biliLibraryQuery({ mid: mid, page_num: state.collectionPage, page_size: 20, web_location: '333.1387' });
+  var data = await apiGet('/x/polymer/web-space/seasons_series_list?' + query, state.ctx, state.cookie);
+  var listing = data.items_lists || data;
+  var seasons = listing.seasons_list || [];
+  var series = listing.series_list || [];
+  state.moreCollections = state.collectionPage * 20 < Number(listing.page && listing.page.total || 0);
+  state.collections = [];
+  seasons.forEach(function (item) {
+    var id = item.meta && item.meta.season_id || item.season_id || item.id;
+    if (id) state.collections.push({ id: 'season:' + id, title: biliLibraryText(item.meta && item.meta.name || item.name || item.title) });
+  });
+  series.forEach(function (item) {
+    var id = item.meta && item.meta.series_id || item.series_id || item.id;
+    if (id) state.collections.push({ id: 'series:' + id, title: biliLibraryText(item.meta && item.meta.name || item.name || item.title) });
+  });
+  if (!state.collectionId || !state.collections.some(function (item) { return item.id === state.collectionId; })) {
+    state.collectionId = state.collections.length ? state.collections[0].id : '';
+  }
+}
+
+async function biliLibraryFetch(state) {
+  var data, rows = [];
+  if (state.source === 'history') {
+    var cursor = state.historyCursor || { max: 0, view_at: 0, business: '' };
+    var path = '/x/web-interface/history/cursor?' + biliLibraryQuery({ type: 'archive', ps: 20, max: cursor.max, view_at: cursor.view_at, business: cursor.business || '' });
+    data = await apiGet(path, state.ctx, state.cookie);
+    rows = data && data.list || [];
+    state.nextCursor = data && data.cursor || null;
+    state.hasNext = !!(rows.length && state.nextCursor && (state.nextCursor.max || state.nextCursor.view_at) &&
+      (state.nextCursor.max !== cursor.max || state.nextCursor.view_at !== cursor.view_at));
+    rows = rows.map(function (entry) {
+      var hist = entry.history || {};
+      if (hist.business !== 'archive' && hist.business !== 'pgc') return null;
+      var arc = entry.arc || {};
+      return biliLibraryNormalizeVideo(Object.assign({}, arc, hist, {
+        bvid: hist.bvid || arc.bvid,
+        aid: hist.oid || arc.aid,
+        ep_id: hist.business === 'pgc' ? hist.oid : '',
+        title: entry.title || arc.title,
+        owner: arc.owner || entry.owner || { name: entry.author_name },
+      }));
+    });
+  } else if (state.source === 'favorites') {
+    if (!state.folderId) return [];
+    data = await apiGet('/x/v3/fav/resource/list?' + biliLibraryQuery({ media_id: state.folderId, pn: state.page, ps: 20, keyword: '', order: 'mtime', type: 0, tid: 0 }), state.ctx, state.cookie);
+    rows = data && data.medias || [];
+    state.hasNext = !!(data && data.has_more);
+    rows = rows.map(function (entry) { return biliLibraryNormalizeVideo(entry, entry.title); });
+  } else if (state.source === 'likes') {
+    data = await apiGet('/x/space/like/video?' + biliLibraryQuery({ vmid: state.uid, pn: state.page, ps: 20 }), state.ctx, state.cookie);
+    rows = Array.isArray(data) ? data : (data.list || data.vlist || data.items || []);
+    if (!Array.isArray(rows)) rows = [];
+    state.hasNext = rows.length >= 20;
+    rows = rows.map(function (entry) { return biliLibraryNormalizeVideo(entry, entry.title); });
+  } else {
+    if (!state.collectionId) return [];
+    var split = state.collectionId.split(':');
+    var collectionId = split[1];
+    if (split[0] === 'season') {
+      var query = biliLibraryQuery({ mid: state.collectionMid || state.uid, season_id: collectionId,
+        page_num: state.page, page_size: 20, web_location: '333.1387' });
+      data = await apiGet('/x/polymer/web-space/seasons_archives_list?' + query, state.ctx, state.cookie);
+      rows = data.archives || [];
+      state.hasNext = state.page * 20 < Number(data.page && data.page.total || 0);
+    } else {
+      data = await apiGet('/x/series/archives?' + biliLibraryQuery({ mid: state.collectionMid || state.uid, series_id: collectionId, only_normal: true, sort: 'desc', pn: state.page, ps: 20 }), state.ctx, state.cookie);
+      rows = data && data.archives || [];
+      state.hasNext = !!(data && data.page && state.page * Number(data.page.ps || 20) < Number(data.page.count || 0));
+    }
+    rows = rows.map(function (entry) { return biliLibraryNormalizeVideo(entry, entry.title); });
+  }
+  var seen = new Set();
+  return rows.filter(function(item) {
+    if (!item || seen.has(item.url)) return false;
+    seen.add(item.url);
+    return true;
+  });
+}
+
+async function biliLibraryLoad(state, reset) {
+  if (state.busy) return;
+  if (reset) {
+    state.page = 1;
+    state.historyCursor = { max: 0, view_at: 0, business: '' };
+    state.nextCursor = null;
+    state.items = [];
+    state.hasNext = false;
+  }
+  state.busy = true;
+  state.error = null;
+  state.empty = false;
+  state.ctx.refresh();
+  try {
+    if (state.source === 'collections' && state.collectionMid) {
+      state.cookie = await effectiveCookie(state.ctx);
+    } else if (!state.uid) {
+      await biliLibraryGetUser(state);
+    }
+    if (state.source === 'favorites' && reset) await biliLibraryFolders(state);
+    if (state.source === 'collections' && reset) await biliLibraryCollections(state);
+    state.items = await biliLibraryFetch(state);
+    state.empty = !state.items.length;
+    return true;
+  } catch (error) {
+    state.error = biliLibraryErrorMessage(error, 'loadError');
+  } finally {
+    state.busy = false;
+    state.ctx.refresh();
+  }
+}
+
+function biliLibraryState(ctx) {
+  return {
+    ctx: ctx, source: 'history', busy: false, error: null, empty: false, accountName: '', uid: '', cookie: '',
+    page: 1, hasNext: false, historyCursor: { max: 0, view_at: 0, business: '' }, nextCursor: null,
+    folders: [], folderId: '', collections: [], collectionId: '', items: [], selected: {}, queued: {},
+    enqueueBusy: false, enqueueResult: null, input: '', inputStatus: null, inputFailed: false,
+    collectionInput: '', collectionMid: '', collectionPage: 1, moreCollections: false,
+  };
+}
+
+async function biliLibraryPageNext(state) {
+  if (!state.hasNext || state.busy) return;
+  var page = state.page, cursor = state.historyCursor;
+  if (state.source === 'history') state.historyCursor = state.nextCursor;
+  else state.page++;
+  if (!(await biliLibraryLoad(state, false))) {
+    state.page = page;
+    state.historyCursor = cursor;
+    state.ctx.refresh();
+  }
+}
+
+function biliLibraryToggle(state, url) {
+  if (state.queued[url]) return;
+  if (state.selected[url]) delete state.selected[url];
+  else {
+    var item = state.items.find(function (item) { return item.url === url; });
+    if (item) state.selected[url] = item;
+  }
+}
+
+async function biliLibraryEnqueue(state) {
+  if (state.enqueueBusy) return;
+  var pending = Object.keys(state.selected).filter(function (url) { return !state.queued[url]; });
+  if (!pending.length) return;
+  var deferred = Math.max(0, pending.length - 20);
+  pending = pending.slice(0, 20);
+  state.enqueueBusy = true;
+  state.enqueueResult = null;
+  state.ctx.refresh();
+  var created = 0, failures = [];
+  for (var i = 0; i < pending.length; i++) {
+    var url = pending[i];
+    try {
+      await flux.tasks.create({ request: { url: url, startPaused: true } });
+      state.queued[url] = true;
+      delete state.selected[url];
+      created++;
+    } catch (error) {
+      failures.push((state.selected[url].title || url) + ': ' + String(error && error.message || error));
+    }
+    state.ctx.refresh();
+  }
+  state.enqueueBusy = false;
+  state.enqueueResult = { created: created, failed: failures.length, deferred: deferred };
+  state.error = failures.length ? { detail: failures.join('\n') } : null;
+  state.ctx.refresh();
+}
+
+async function biliLibrarySubmitInput(state, input, ctx) {
+  state.input = input;
+  try {
+    var url = normalizeBiliInput(input);
+    await flux.tasks.create({ request: { url: url, startPaused: true } });
+    state.input = '';
+    state.inputFailed = false;
+    state.inputStatus = { key: 'submitted', params: { url: url } };
+  } catch (error) {
+    state.inputFailed = true;
+    state.inputStatus = biliLibraryErrorMessage(error, 'submitError');
+  }
+  ctx.refresh();
+}
+
+function biliLibraryRender(state, ctx) {
+  var locale = ctx && ctx.locale;
+  function t(key, params) { return biliText(locale, biliLibraryStrings, key, params); }
+  function status(message) { return message.key ? t(message.key, message.params) : message.detail; }
+  var h = flux.ui.h;
+  var controls = [];
+  controls.push(h('section', { key: 'submit', title: t('submit') },
+    h('textarea', { key: 'input', rows: 2, value: state.input, placeholder: t('placeholder') }),
+    h('button', { key: 'submit-input', text: t('queue'), variant: 'primary' }),
+    state.inputStatus ? h('text', { key: 'input-status', text: status(state.inputStatus), tone: state.inputFailed ? 'danger' : 'success' }) : null));
+  controls.push(h('heading', { key: 'title', text: t('title'), level: 2 }));
+  controls.push(h('text', { key: 'account', text: state.uid ? t('account', { name: state.accountName || t('user'), uid: state.uid }) : t('accountRequired'), tone: 'muted', size: 'sm' }));
+  controls.push(h('stack', { key: 'sources', direction: 'row', gap: 'xs' }, biliLibrarySources.map(function (source) {
+    return h('button', { key: 'source-' + source, text: t(source), variant: state.source === source ? 'primary' : 'outline', disabled: state.busy }, null);
+  })));
+  if (state.source === 'favorites' && state.folders.length) {
+    controls.push(h('select', { key: 'folders', value: state.folderId, options: state.folders.map(function (folder) { return { value: folder.id, label: folder.title || t('unnamedFolder') }; }), disabled: state.busy }));
+  }
+  if (state.source === 'collections') {
+    controls.push(h('stack', { key: 'up', direction: 'row', gap: 'xs' },
+      h('input', { key: 'up-input', value: state.collectionInput, placeholder: t('creatorInput') }),
+      h('button', { key: 'up-load', text: t('findCollections'), disabled: state.busy })));
+    if (state.collections.length) {
+      controls.push(h('stack', { key: 'collection-picker', direction: 'row', gap: 'xs' },
+        h('button', { key: 'collections-prev', text: t('prevCollections'), disabled: state.busy || state.collectionPage <= 1 }),
+        h('select', { key: 'collections', value: state.collectionId, options: state.collections.map(function (item) {
+          return { value: item.id, label: item.title || t(item.id.indexOf('season:') === 0 ? 'collection' : 'series') };
+        }), disabled: state.busy }),
+        h('button', { key: 'collections-next', text: t('nextCollections'), disabled: state.busy || !state.moreCollections })));
+    }
+  }
+  controls.push(h('stack', { key: 'pager', direction: 'row', gap: 'sm', align: 'center' },
+    h('button', { key: 'refresh', text: t(state.busy ? 'loading' : 'refresh'), disabled: state.busy }, null),
+    h('text', { key: 'page-number', text: state.source === 'history' ? t('historyPager') : t('page', { page: state.page }), tone: 'muted', size: 'sm' }),
+    h('button', { key: 'next', text: t('next'), disabled: state.busy || !state.hasNext }, null)));
+  if (state.busy) controls.push(h('text', { key: 'loading', text: t('reading'), tone: 'muted' }));
+  if (state.error) controls.push(h('text', { key: 'error', text: status(state.error), tone: 'danger' }));
+  if (state.empty) controls.push(h('text', { key: 'message', text: t('noResults'), tone: 'muted' }));
+  var selectedCount = Object.keys(state.selected).length;
+  controls.push(h('stack', { key: 'enqueue', direction: 'row', gap: 'sm', align: 'center' },
+    h('button', { key: 'enqueue-button', text: t(state.enqueueBusy ? 'enqueueing' : 'enqueue'), variant: 'primary', disabled: state.enqueueBusy || !selectedCount }, null),
+    h('text', { key: 'selection-count', text: t('selection', { count: selectedCount }), tone: 'muted', size: 'sm' })));
+  if (state.enqueueResult) {
+    var result = state.enqueueResult;
+    var parts = [t('created', { count: result.created })];
+    if (result.failed) parts.push(t('failed', { count: result.failed }));
+    if (result.deferred) parts.push(t('deferred', { count: result.deferred }));
+    controls.push(h('text', { key: 'enqueue-result', text: parts.join(biliLocale(locale) === 'zh' ? '' : ' '), tone: result.failed ? 'warning' : 'success' }));
+  }
+  state.items.forEach(function (item) {
+    var chosen = !!state.selected[item.url];
+    var queued = !!state.queued[item.url];
+    controls.push(h('card', { key: 'media-' + encodeURIComponent(item.url) },
+      h('stack', { gap: 'xs' },
+        h('text', { key: 'media-title', text: item.title || t('untitled'), weight: 'medium' }),
+        h('text', { key: 'media-owner', text: item.owner || item.url, tone: 'muted', size: 'sm' }),
+        h('button', { key: 'toggle-' + encodeURIComponent(item.url), text: t(queued ? 'queued' : (chosen ? 'unselect' : 'select')), variant: chosen && !queued ? 'primary' : 'outline', disabled: queued }, null))));
+  });
+  return h('scroll', { key: 'scroll' }, h('stack', { gap: 'sm', padding: 'md' }, controls));
+}
+
+flux.ui.view('library', {
+  async init(ctx) {
+    var state = biliLibraryState(ctx);
+    await biliLibraryLoad(state, true);
+    return state;
+  },
+  render(state, ctx) { return biliLibraryRender(state, ctx); },
+  async event(state, ev, ctx) {
+    var node = String(ev.node || '').split('/').pop();
+    if (node === 'input' && ev.type === 'change') { state.input = String(ev.value || ''); return; }
+    if (node === 'submit-input' && ev.type === 'press') { await biliLibrarySubmitInput(state, state.input, ctx); return; }
+    if (node === 'up-input' && ev.type === 'change') { state.collectionInput = String(ev.value || ''); return; }
+    if ((node === 'up-load' && ev.type === 'press') || (node === 'up-input' && ev.type === 'submit')) {
+      var mid = String(ev.type === 'submit' ? ev.value || '' : state.collectionInput).trim();
+      if (mid && !/^[1-9]\d*$/.test(mid)) {
+        state.error = { key: 'invalidUid' };
+        ctx.refresh();
+        return;
+      }
+      state.collectionMid = mid;
+      state.collectionInput = mid;
+      state.collectionId = '';
+      state.collectionPage = 1;
+      state.ctx = ctx;
+      await biliLibraryLoad(state, true);
+      return;
+    }
+    if (ev.type === 'press' && (node === 'collections-prev' || node === 'collections-next')) {
+      if ((node === 'collections-prev' && state.collectionPage > 1) || (node === 'collections-next' && state.moreCollections)) {
+        state.collectionPage += node === 'collections-prev' ? -1 : 1;
+        state.ctx = ctx;
+        await biliLibraryLoad(state, true);
+      }
+      return;
+    }
+    if (node.indexOf('source-') === 0 && ev.type === 'press') {
+      var source = node.slice(7);
+      if (biliLibrarySources.indexOf(source) >= 0) {
+        state.source = source;
+        state.folderId = '';
+        state.collectionId = '';
+        state.ctx = ctx;
+        await biliLibraryLoad(state, true);
+      }
+      return;
+    }
+    if (node === 'refresh' && ev.type === 'press') { state.ctx = ctx; await biliLibraryLoad(state, true); return; }
+    if (node === 'next' && ev.type === 'press') { state.ctx = ctx; await biliLibraryPageNext(state); return; }
+    if (node === 'folders' && ev.type === 'change') {
+      state.folderId = String(ev.value || ''); state.ctx = ctx; await biliLibraryLoad(state, true); return;
+    }
+    if (node === 'collections' && ev.type === 'change') {
+      state.collectionId = String(ev.value || ''); state.ctx = ctx; await biliLibraryLoad(state, true); return;
+    }
+    if (node === 'enqueue-button' && ev.type === 'press') { state.ctx = ctx; await biliLibraryEnqueue(state); return; }
+    if (node.indexOf('toggle-') === 0 && ev.type === 'press') {
+      var encoded = node.slice(7), url;
+      try { url = decodeURIComponent(encoded); } catch (error) { return; }
+      biliLibraryToggle(state, url);
+      ctx.refresh();
+    }
+  },
+});
+})();

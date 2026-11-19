@@ -6,7 +6,7 @@
 
 | FluxDown identity | 目录 | 版本 | 功能 |
 | --- | --- | --- | --- |
-| `fluxdown@bilibili-bangumi` | [`bilibili-bangumi/`](./bilibili-bangumi/) | `1.1.1` | 解析番剧、普通视频及短链；番剧和 UP 主订阅共用插件设置；可移植二维码登录及登录态恢复（FD ≥ 0.6.4） |
+| `gulanthys@bilibili-bangumi` | [`bilibili-bangumi/`](./bilibili-bangumi/) | `1.2.0` | 番剧、普通多 P 和 UGC 合集、附加资源、编码和音质选择、内容库、订阅与二维码登录（需要 FluxDown 0.6.9 或兼容开发构建） |
 
 ## 目录结构
 
@@ -29,6 +29,8 @@ FluxDown 插件发布包是一个 ZIP 格式的归档文件，通常使用 `.fxp
 ```text
 plugin.fxplug
 ├── manifest.json
+├── main.js
+├── auth.js
 └── resolve.js
 ```
 

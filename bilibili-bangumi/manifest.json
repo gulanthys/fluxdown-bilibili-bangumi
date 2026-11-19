@@ -1,11 +1,11 @@
 {
-  "identity": "fluxdown@bilibili-bangumi",
-  "name": "Bilibili视频下载",
-  "version": "1.1.1",
-  "description": "Bilibili 视频插件：支持番剧、UP 主投稿订阅、DASH 解析及二维码登录。",
-  "homepage": "https://github.com/gulanthys",
-  "minAppVersion": "0.6.4",
-  "permissions": ["auth"],
+  "identity": "gulanthys@bilibili-bangumi",
+  "name": "Bilibili",
+  "version": "1.2.0",
+  "description": "Bilibili video, series, and subscription support for FluxDown.",
+  "homepage": "https://github.com/gulanthys/fluxdown-bilibili-bangumi",
+  "minAppVersion": "0.6.9",
+  "permissions": ["auth", "tasks"],
   "auth": {
     "entry": "auth.js"
   },
@@ -14,7 +14,8 @@
   },
   "contributes": {
     "views": [
-      { "id": "login", "title": "Bilibili 扫码登录", "location": "auth" }
+      { "id": "login", "title": "Bilibili Login", "location": "auth" },
+      { "id": "library", "title": "Bilibili Library", "location": "activity" }
     ]
   },
   "resolvers": [
@@ -67,44 +68,154 @@
   "settings": [
     {
       "key": "cookies",
-      "title": "导入 Bilibili Cookie",
-      "description": "解析时使用的登录态。支持浏览器 Cookie 头或 Netscape cookies.txt；保存后会用于后续解析与下载。",
+      "title": "Import Bilibili Cookies",
+      "description": "Authentication used during parsing. Accepts a browser Cookie header or Netscape cookies.txt; saved for subsequent parsing and downloads.",
+      "localizations": {
+        "en": {
+          "title": "Import Bilibili Cookies",
+          "description": "Authentication used during parsing. Accepts a browser Cookie header or Netscape cookies.txt; saved for subsequent parsing and downloads."
+        },
+        "zh-Hans": {
+          "title": "导入 Bilibili Cookie",
+          "description": "解析时使用的登录态。支持浏览器 Cookie 头或 Netscape cookies.txt；保存后会用于后续解析与下载。"
+        }
+      },
       "type": "string",
       "widget": "textarea",
       "default": ""
     },
     {
       "key": "includeExtras",
-      "title": "包含番外与花絮",
-      "description": "番剧清单与番剧订阅共用：关闭时只列正片并排除预告；开启后同时列出番外、预告、PV、采访等分区。",
+      "title": "Include Extras and Behind-the-Scenes",
+      "description": "Shared by series lists and series subscriptions. When off, lists only main episodes and excludes previews; when on, also lists extras, previews, PVs, interviews, and other sections.",
+      "localizations": {
+        "en": {
+          "title": "Include Extras and Behind-the-Scenes",
+          "description": "Shared by series lists and series subscriptions. When off, lists only main episodes and excludes previews; when on, also lists extras, previews, PVs, interviews, and other sections."
+        },
+        "zh-Hans": {
+          "title": "包含番外与花絮",
+          "description": "番剧清单与番剧订阅共用：关闭时只列正片并排除预告；开启后同时列出番外、预告、PV、采访等分区。"
+        }
+      },
       "type": "boolean",
       "widget": "toggle",
       "default": "false"
     },
     {
       "key": "highestQualityOnly",
-      "title": "优先最高画质",
-      "description": "番剧清单及番剧、UP 主订阅共用：每个视频只展示最高可用画质。",
+      "title": "Prefer Highest Quality",
+      "description": "Shared by series lists and series/UP creator subscriptions: show only the highest available quality for each video.",
+      "localizations": {
+        "en": {
+          "title": "Prefer Highest Quality",
+          "description": "Shared by series lists and series/UP creator subscriptions: show only the highest available quality for each video."
+        },
+        "zh-Hans": {
+          "title": "优先最高画质",
+          "description": "番剧清单及番剧、UP 主订阅共用：每个视频只展示最高可用画质。"
+        }
+      },
       "type": "boolean",
       "widget": "toggle",
       "default": "false"
     },
     {
       "key": "quality",
-      "title": "默认画质",
-      "description": "普通链接的默认画质，同时作为番剧和 UP 主订阅的画质上限。订阅不支持仅音频，选择仅音频时按最佳画质处理。",
+      "title": "Default Quality",
+      "description": "Default quality for regular links and quality ceiling for series and UP creator subscriptions. Subscriptions do not support audio-only; audio-only is treated as best quality.",
+      "localizations": {
+        "en": {
+          "title": "Default Quality",
+          "description": "Default quality for regular links and quality ceiling for series and UP creator subscriptions. Subscriptions do not support audio-only; audio-only is treated as best quality."
+        },
+        "zh-Hans": {
+          "title": "默认画质",
+          "description": "普通链接的默认画质，同时作为番剧和 UP 主订阅的画质上限。订阅不支持仅音频，选择仅音频时按最佳画质处理。"
+        }
+      },
       "type": "string",
       "widget": "select",
       "options": [
-        { "value": "best", "label": "最佳画质" },
-        { "value": "2160", "label": "不超过 2160p" },
-        { "value": "1440", "label": "不超过 1440p" },
-        { "value": "1080", "label": "不超过 1080p" },
-        { "value": "720", "label": "不超过 720p" },
-        { "value": "480", "label": "不超过 480p" },
-        { "value": "audio", "label": "仅音频" }
+        { "value": "best", "label": "Best quality", "localizations": { "en": "Best quality", "zh-Hans": "最佳画质" } },
+        { "value": "2160", "label": "Up to 2160p", "localizations": { "en": "Up to 2160p", "zh-Hans": "不超过 2160p" } },
+        { "value": "1440", "label": "Up to 1440p", "localizations": { "en": "Up to 1440p", "zh-Hans": "不超过 1440p" } },
+        { "value": "1080", "label": "Up to 1080p", "localizations": { "en": "Up to 1080p", "zh-Hans": "不超过 1080p" } },
+        { "value": "720", "label": "Up to 720p", "localizations": { "en": "Up to 720p", "zh-Hans": "不超过 720p" } },
+        { "value": "480", "label": "Up to 480p", "localizations": { "en": "Up to 480p", "zh-Hans": "不超过 480p" } },
+        { "value": "audio", "label": "Audio only", "localizations": { "en": "Audio only", "zh-Hans": "仅音频" } }
       ],
       "default": "best"
+    },
+    {
+      "key": "videoCodec",
+      "title": "Video Codec Preference",
+      "description": "Prefer the selected codec at the same quality; use a compatible codec at that quality if unavailable.",
+      "localizations": {
+        "en": {
+          "title": "Video Codec Preference",
+          "description": "Prefer the selected codec at the same quality; use a compatible codec at that quality if unavailable."
+        },
+        "zh-Hans": {
+          "title": "视频编码偏好",
+          "description": "在同一画质优先选择指定编码；不可用时使用该画质的兼容编码。"
+        }
+      },
+      "type": "string",
+      "widget": "select",
+      "default": "auto",
+      "options": [
+        { "value": "auto", "label": "Auto (prefer AVC)", "localizations": { "en": "Auto (prefer AVC)", "zh-Hans": "自动（优先 AVC）" } },
+        { "value": "avc", "label": "AVC (H.264)", "localizations": { "en": "AVC (H.264)", "zh-Hans": "AVC (H.264)" } },
+        { "value": "hevc", "label": "HEVC (H.265)", "localizations": { "en": "HEVC (H.265)", "zh-Hans": "HEVC (H.265)" } },
+        { "value": "av1", "label": "AV1", "localizations": { "en": "AV1", "zh-Hans": "AV1" } }
+      ]
+    },
+    {
+      "key": "audioQuality",
+      "title": "Audio Quality Preference",
+      "description": "For muxed audio/video and audio-only; if the selected tier is unavailable, prefer the nearest available tier.",
+      "localizations": {
+        "en": {
+          "title": "Audio Quality Preference",
+          "description": "For muxed audio/video and audio-only; if the selected tier is unavailable, prefer the nearest available tier."
+        },
+        "zh-Hans": {
+          "title": "音质偏好",
+          "description": "适用于音画合并与仅音频；所选档位没有开放时优先降到最近可用档。"
+        }
+      },
+      "type": "string",
+      "widget": "select",
+      "default": "auto",
+      "options": [
+        { "value": "auto", "label": "Auto (highest standard quality)", "localizations": { "en": "Auto (highest standard quality)", "zh-Hans": "自动（最高普通音质）" } },
+        { "value": "30216", "label": "64K", "localizations": { "en": "64K", "zh-Hans": "64K" } },
+        { "value": "30232", "label": "132K", "localizations": { "en": "132K", "zh-Hans": "132K" } },
+        { "value": "30280", "label": "192K", "localizations": { "en": "192K", "zh-Hans": "192K" } },
+        { "value": "30250", "label": "Dolby Audio", "localizations": { "en": "Dolby Audio", "zh-Hans": "杜比音频" } },
+        { "value": "30251", "label": "Hi-Res / FLAC", "localizations": { "en": "Hi-Res / FLAC", "zh-Hans": "Hi-Res / FLAC" } }
+      ]
+    },
+    {
+      "key": "cover", "title": "List Covers", "type": "boolean", "widget": "toggle", "default": "false",
+      "localizations": { "en": { "title": "List Covers" }, "zh-Hans": { "title": "列出封面" } }
+    },
+    {
+      "key": "subtitles", "title": "List Human Subtitles (SRT)", "type": "boolean", "widget": "toggle", "default": "false",
+      "localizations": { "en": { "title": "List Human Subtitles (SRT)" }, "zh-Hans": { "title": "列出人工字幕 (SRT)" } }
+    },
+    {
+      "key": "aiSubtitles", "title": "List Bilibili AI Subtitles (SRT)", "type": "boolean", "widget": "toggle", "default": "false",
+      "localizations": { "en": { "title": "List Bilibili AI Subtitles (SRT)" }, "zh-Hans": { "title": "列出 B 站 AI 字幕 (SRT)" } }
+    },
+    {
+      "key": "danmakuXml", "title": "List XML Danmaku", "type": "boolean", "widget": "toggle", "default": "false",
+      "localizations": { "en": { "title": "List XML Danmaku" }, "zh-Hans": { "title": "列出 XML 弹幕" } }
+    },
+    {
+      "key": "danmakuAss", "title": "List ASS Danmaku", "type": "boolean", "widget": "toggle", "default": "false",
+      "localizations": { "en": { "title": "List ASS Danmaku" }, "zh-Hans": { "title": "列出 ASS 弹幕" } }
     }
   ]
 }

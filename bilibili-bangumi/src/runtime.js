@@ -81,7 +81,7 @@ function sanitizeFileName(name) {
     .replace(/[\\/:*?"<>|\u0000-\u001f]/g, ' ')
     .replace(/\.{2,}/g, '.')
     .replace(/\s+/g, ' ')
-    .trim(), 120) || 'video';
+    .trim(), 120).replace(/[.\s]+$/, '') || 'video';
 }
 
 function sanitizePath(name) {
@@ -110,7 +110,7 @@ function fitManifestItems(items) {
       var suffix = duplicate === 1 ? '' : ' (' + duplicate + ')';
       var stemBudget = nameBudget - Array.from(extension + suffix).length;
       if (stemBudget < 1) throw new Error('同目录中的番剧文件名无法唯一化');
-      candidate = truncateCodePoints(stem, stemBudget) + suffix + extension;
+      candidate = (truncateCodePoints(stem, stemBudget).replace(/[.\s]+$/, '') || 'v') + suffix + extension;
       if (!names[candidate.toLowerCase()]) break;
       candidate = '';
     }
@@ -165,7 +165,7 @@ function normalizeSessdataCookie(cookie) {
 
 async function cookieFromAuthProfile() {
   if (!flux.auth || typeof flux.auth.get !== 'function') return '';
-  var apiAuthRef = 'fluxdown@bilibili-bangumi::https://api.bilibili.com';
+  var apiAuthRef = 'gulanthys@bilibili-bangumi::https://api.bilibili.com';
   try {
     var raw = await flux.storage.get('auth.refs');
     var parsed = raw ? JSON.parse(raw) : [];

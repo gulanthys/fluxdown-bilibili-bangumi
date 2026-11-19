@@ -1,186 +1,210 @@
-# Bilibili视频下载插件
+# Bilibili Plugin
 
-`fluxdown@bilibili-bangumi` 是面向 FluxDown 的 Bilibili 番剧与投稿解析插件。支持番剧分集、普通 BV/AV 视频及 UP 主投稿订阅；解析 DASH 视频和音频地址后交由 FluxDown 下载。
+`gulanthys@bilibili-bangumi` is FluxDown's Bilibili content parsing and subscription plugin. Playback routing, supplementary resources, and episode lists are handled by the host; the plugin does not provide a separate download engine.
 
-## 功能
+## Features
 
-- 支持 Bilibili 番剧播放页：`/bangumi/play/ss...` 和 `/bangumi/play/ep...`
-- 支持 Bilibili 番剧媒体页：`/bangumi/media/md...`
-- 支持带 `season_id` 参数的番剧播放页和媒体页
-- 支持 BV/AV 普通视频链接，`?p=N` 选择分 P（默认第 1 P）
-- 支持移动端 Bilibili 番剧与普通视频链接
-- 支持 `b23.tv`、`bili2233.cn` 短链，展开后复用普通视频、番剧或订阅入口
-- 自动发现正片分集，并按集生成下载任务
-- 可选发现番外、预告、PV、采访等分区
-- 支持 DASH 视频画质选择：最佳、2160p、1440p、1080p、720p、480p
-- 支持仅下载音频（M4A）
-- 每个可用画质会生成独立下载条目，名称保持视频原名并追加画质（例如 [1080p-高清]）
-- 优先使用高质量音频轨道，并将视频与音频交给 FluxDown 合并下载流程
-- 支持浏览器 Cookie 头和 Netscape `cookies.txt` 格式，并按 Bilibili API 域名过滤 Netscape Cookie
-- 支持 FD 可移植 `auth` 视图：未登录时展示 Bilibili 登录二维码，已登录时展示成功状态，认证档案供后续解析复用
-- 支持以 `bilibili-bangumi` provider 订阅番剧及 UP 主投稿；宿主负责轮询、去重和创建下载任务
-- 番剧和 UP 主订阅统一使用插件设置中的画质与筛选选项，无需在订阅中重复配置
-- 文件名按 FluxDown 清单路径总长限制截断，并对同目录重名条目编号
-- 普通视频链接支持 BV 号及 `av` + 数字 ID；AV 链接会通过视频信息接口读取对应 BV 号和分 P。
+- Supports Bilibili series playback pages: `/bangumi/play/ss...` and `/bangumi/play/ep...`
+- Supports Bilibili series media pages: `/bangumi/media/md...`
+- Supports series playback and media pages with a `season_id` parameter
+- Opens an episode list for regular multi-part videos and UGC collections without `?p=N`; collections are grouped by section. With `?p=N`, resolves only that part.
+- Supports mobile Bilibili series and regular video links
+- Supports `b23.tv` and `bili2233.cn` short links, expanded into regular video, series, or subscription flows
+- Automatically discovers main-series episodes and creates a download task per episode
+- Optionally discovers extras, previews, PVs, interviews, and other sections
+- Supports DASH video quality selection: best, 2160p, 1440p, 1080p, 720p, and 480p
+- Supports audio-only downloads, with container determined by the actual audio track; supports AVC, HEVC, AV1, and 64K, 132K, 192K, Dolby, and Hi-Res audio quality
+- Creates a separate download item for each available quality, retaining the original video name and appending the quality (for example, `[1080p-高清]`)
+- FluxDown merges audio and video; supplementary-resource settings allow covers, human/AI subtitles (SRT), and XML/ASS danmaku to be selected independently in episode lists
+- Supports browser Cookie headers and Netscape `cookies.txt`, filtering Netscape cookies by Bilibili API domain
+- Supports the portable FD `auth` view: displays a Bilibili login QR code when signed out and a success state when signed in; the auth profile is reused for subsequent parsing
+- Supports `bilibili-bangumi` provider subscriptions for series and UP creator submissions; the host handles polling, deduplication, and download task creation
+- The GPUI and Web “Bilibili Library” activity accepts IDs, links, or share text, and can enqueue items from watch history, favorites, likes, and UP creator collections
+- Series and UP creator subscriptions share the plugin's quality and filtering settings
+- Truncates filenames to FluxDown's manifest path-length limit and numbers duplicate entries in the same directory
+- Regular video links support BV IDs and `av` plus numeric IDs; AV links use the video information API to read the corresponding BV ID and parts
 
-## 系统要求
+## Language support
 
-- FluxDown `0.6.4` 或更高版本（需支持可移植 `auth` 视图）
-- 能够访问 `api.bilibili.com`
-- 需要登录权限的内容必须提供有效的 Bilibili Cookie
-- DASH 音视频合并需要在 FluxDown 组件设置中安装或配置 FFmpeg
+Settings use the host's manifest `localizations` fields for English (`en`) and Simplified Chinese (`zh-Hans`), including option labels localized by option value. Some host-rendered labels are fixed strings and cannot be localized by a plugin: the plugin name and description, activity/auth view titles, and other manifest labels without localization support use neutral branding or English instead.
 
-## 安装
+Portable views choose their language from the live host locale: every locale tag beginning with `zh` (including regional tags and underscore variants) uses Simplified Chinese; all other locales, including an omitted locale, use English. Externally sourced titles and native resolver text are not automatically translated unless a locale-aware translation is explicitly provided; Bilibili-provided titles and host-rendered resolver text may therefore remain in their original language.
 
-### 从 `.fxplug` 安装包安装
+## Requirements
 
-在 FluxDown 的“设置 → 扩展 → 插件”中选择 `.fxplug` 包安装；安装后在插件列表启用。
+- FluxDown `0.6.9` or a development build with an equivalent plugin protocol; older hosts do not support this version's generated subtitle/ASS files and track fallback URLs.
+- Access to `api.bilibili.com`
+- A valid Bilibili Cookie for content requiring login
+- FFmpeg installed or configured in FluxDown component settings to merge DASH audio and video
 
-`.fxplug` 包根目录需包含 `manifest.json`、`resolve.js`、`auth.js` 和 `main.js`；开发目录安装时也必须直接包含这四个文件。`main.js` 已内嵌二维码编码器及其 MIT 许可，不需要额外安装运行时依赖。
+## Installation
 
-## 配置
+### Install from a `.fxplug` package
 
-安装插件后，在插件卡片的设置中可以配置：
+In FluxDown, choose the `.fxplug` package from **Settings → Extensions → Plugins**; enable the plugin after installation.
 
-| 设置 | 说明 | 默认值 |
+The root of the `.fxplug` package must contain `manifest.json`, `resolve.js`, `auth.js`, and `main.js`; a development install directory must also contain those files directly. `main.js` embeds a QR encoder under the MIT license, so no additional runtime dependency is required.
+
+## Configuration
+
+After installing the plugin, configure these settings in the plugin card:
+
+| Setting | Description | Default |
 | --- | --- | --- |
-| 导入 Bilibili Cookie | 浏览器 Cookie 请求头或 Netscape `cookies.txt` 内容；Netscape 导入仅接受 Bilibili 域及根路径 Cookie | 空 |
-| 包含番外与花絮 | 番剧清单和番剧订阅同时列出番外、预告、PV、采访等分区 | 关闭 |
-| 优先最高画质 | 番剧清单及番剧／UP 主订阅，每个视频只列最高可用画质 | 关闭 |
-| 默认画质 | 普通链接默认画质；番剧和 UP 主订阅统一使用的画质上限 | 最佳画质 |
+| Import Bilibili Cookies | Browser Cookie request header or Netscape `cookies.txt` content; Netscape import accepts only Bilibili-domain and root-path cookies | Empty |
+| Include Extras and Behind-the-Scenes | Also list extras, previews, PVs, interviews, and other sections in series lists and subscriptions | Off |
+| Prefer Highest Quality | List only the highest available quality per video in series lists and series/UP creator subscriptions | Off |
+| Default Quality | Default for regular links; shared quality ceiling for series and UP creator subscriptions | Best quality |
+| Video Codec Preference | AVC / HEVC / AV1; falls back to a compatible codec at the same quality when the selected codec is unavailable | Auto |
+| Audio Quality Preference | Selects 64K through Hi-Res; prefers a lower available tier if the selected tier is unavailable | Auto (standard audio) |
+| Covers, human subtitles, AI subtitles, XML / ASS danmaku | Individually controls supplementary resources in regular video, collection, and series lists | Off |
 
-显式 Cookie 作为插件设置保存在本机配置中；扫码登录凭据由 FluxDown 认证档案管理。不要提交或分享 Cookie。失效后重新扫码或导入有效 Cookie。
-## 登录
+Explicit Cookies are saved in the local plugin configuration; QR login credentials are managed by the FluxDown auth profile. Do not share or submit Cookies. If they expire, scan again or import a valid Cookie.
 
-在插件卡片中点击“认证/登录”：
+## Login
 
-1. 先向 Bilibili 校验已保存的登录态；仍有效时直接显示登录成功页，不生成新二维码。未登录时自动展示二维码和扫码指引，不显示站点、登录信息或“开始登录”表单；
-2. 使用 Bilibili App 扫描并确认；
-3. 每 2 秒自动检查扫码结果，成功后保存认证 Cookie、停止轮询并切换到登录成功页，不自动关闭窗口；
-4. 后续解析自动复用已保存登录态，认证未过期前不需要重复扫码。
+Click **Authenticate/Login** in the plugin card:
 
-状态查询会向 Bilibili `/x/web-interface/nav` 验证 API 认证档案；服务端撤销的登录态不再显示已登录。网络失败只报告暂时无法检查，不删除凭据。
+1. The plugin first validates the saved login state with Bilibili. If valid, it shows the login success page without creating a QR code. Otherwise it automatically displays a QR code and scan instructions; it does not show a site, login-information, or “start login” form.
+2. Scan and confirm using the Bilibili app.
+3. The plugin checks the scan result every two seconds. On success it saves the auth Cookie, stops polling, and switches to the success page without automatically closing the window.
+4. Subsequent parsing reuses the saved login state, so scanning is not required again until the auth expires.
 
-关闭窗口会停止轮询并清理二维码会话，不删除已保存的登录凭据。二维码过期或请求失败时可点击“刷新二维码”；登录成功后只有主动点击“重新扫码登录”才生成新二维码，新账号确认前保留旧认证档案。该视图不展示注销或账号输入表单。
+The status query validates the API auth profile with Bilibili `/x/web-interface/nav`; a server-revoked login is no longer shown as signed in. Network failures report that the status could not be checked temporarily and do not delete credentials.
 
-## 使用
+Closing the window stops polling and clears the QR session without deleting saved credentials. If the QR expires or a request fails, choose **Refresh QR code**. After login, a new QR code is created only by explicitly choosing **Scan again**; the old auth profile is kept until the new account is confirmed. This view does not provide a logout or account-input form.
 
-1. 复制 Bilibili 番剧播放页、媒体页或 BV/AV 普通视频链接。
-2. 将链接交给 FluxDown 创建下载任务。
-3. 番剧链接返回分集清单；普通视频直接按所选画质解析（可用 `?p=N` 指定分 P）。
-4. FluxDown 获取短期播放地址并开始下载。
+## Usage
 
-每一集会以番剧名和集数命名；番外等分区会放入对应的子目录。
+1. Copy a Bilibili series playback page, media page, or BV/AV regular video link.
+2. Give the link to FluxDown to create a download task.
+3. Series, multi-part, UGC collection, and links with supplementary resources enabled return a selectable list. A single video usually returns quality choices directly; use `?p=N` to select a specific part.
+4. FluxDown obtains a short-lived playback URL and starts the download.
 
-## 解析流程
+Episodes are named with the series title and episode number; extras and other sections are placed in their corresponding subdirectories.
 
-插件分两阶段工作：
+### Library
 
-1. 番剧链接 → 调用 Bilibili 番剧接口，读取分集清单。
-2. BV/AV 链接 → 查询视频信息与分 P，再解析指定分 P 的 DASH 视频/音频地址。
-3. 番剧集或订阅视频标识 → 调用播放接口获取短期直链，再返回给 FluxDown。
+Open **Bilibili Library** from the activity bar in GPUI or Web. Paste share text or enter a BV, AV, EP, SS, or numeric AV ID, then choose **Add to queue**. Tasks are created paused and can be started from the downloads list after review.
 
-插件不创建后台定时器或直接创建订阅任务；订阅轮询、去重、过滤和建任务由 FluxDown 核心负责。
+Watch history, favorites, and account likes reuse the plugin login state; a public creator collection can be specified by UID. Select entries and add them in batches of up to 20. A failed item does not re-enqueue items already created in the same batch. Regular creator submissions enqueue the part indicated by the list, or part 1 when unspecified; they do not enqueue the entire UGC collection. Login is required to use content from your own account. The `tasks` permission is used to create tasks and must be authorized in the client after upgrading.
 
-## 番剧订阅
+## Parsing flow
 
-在 FluxDown 的 RSS/订阅向导中，将来源选择为 `Bilibili 番剧 · bilibili-bangumi`，地址填写番剧播放页、媒体页或单集页，例如：
+The plugin operates in two stages:
+
+1. Series link → calls Bilibili's series API and reads the episode list.
+2. BV/AV link → queries video information; selects one part using `?p=N`, or returns a regular multi-part/UGC collection list.
+3. Series episode or subscription video ID → calls the playback API for a short-lived direct URL, then returns it to FluxDown.
+
+FluxDown core handles subscription polling, deduplication, and subscription task creation. The library submits regular download tasks only after user confirmation.
+
+## Series subscriptions
+
+In FluxDown's RSS/subscription wizard, choose `Bilibili Series · bilibili-bangumi` as the source and enter a series playback page, media page, or episode page, for example:
 
 ```text
 https://www.bilibili.com/bangumi/play/ss12345
 ```
 
-订阅统一使用「设置 → 扩展 → 插件 → Bilibili视频下载 → 设置」中的「默认画质」「包含番外与花絮」「优先最高画质」，不再提供订阅级重复配置。修改插件设置后，后续订阅抓取自动使用新设置；已创建的下载任务不受影响。
+Subscriptions use **Default Quality**, **Include Extras and Behind-the-Scenes**, and **Prefer Highest Quality** from **Settings → Extensions → Plugins → Bilibili → Settings**; there are no duplicate subscription-level settings. Subsequent subscription fetches use updated plugin settings; existing download tasks are unaffected.
 
-番剧每轮最多检查最近 50 集，UP 主每轮检查最近 20 条投稿。画质上限选择不超过指定高度的最高可用画质；「仅音频」不适用于订阅，订阅按最佳画质处理。条目标题显示实际画质，核心建任务时把指定画质交回插件二段解析。播放地址是短期直链，长时间暂停后可能需要重新解析或重试。
+Each series poll checks at most the 50 most recent episodes; each UP creator poll checks at most the 20 most recent submissions. The quality ceiling selects the highest available quality no greater than the chosen height; **Audio only** is not supported for subscriptions and is treated as best quality. Entry titles show the actual quality, and the core passes the selected quality back to the plugin for second-stage resolution. Playback URLs are short-lived and may need to be re-resolved or retried after a long pause.
 
-筛选设置仍可按标题过滤画质，例如包含 `1080p|720p`、排除 `HDR`。如果希望同一集保留多个画质，不要开启“智能剧集去重”。
-## 常见问题
+Filter settings can still filter qualities by title, for example include `1080p|720p` or exclude `HDR`. Do not enable **Smart Episode Deduplication** if multiple qualities for the same episode should be retained.
 
-### 安装窗口看不到 `.fxplug`
+## Troubleshooting
 
-`.fxplug` 是 zip 格式的插件包，直接选择该文件安装；不要解压后重复压缩。
+### The installer does not show the `.fxplug` file
 
-### 安装后解析失败
+`.fxplug` is a zip-format plugin package. Select the file directly; do not extract and re-compress it.
 
-依次检查：
+### Parsing fails after installation
 
-- FluxDown 版本是否至少为 `0.6.4`；
-- 插件是否已启用；
-- Bilibili 链接是否为支持的番剧页面、BV/AV 普通视频页面或对应短链；
-- Bilibili Cookie 是否有效，是否有对应内容的访问权限；
-- 客户端是否能够访问 `api.bilibili.com`。
+Check the following:
 
-### 只能看到部分画质
+- The client is at least version `0.6.9` (older clients can continue using plugin `1.1.3`).
+- The plugin is enabled.
+- The Bilibili link is a supported series page, BV/AV regular video page, or corresponding short link.
+- The Bilibili Cookie is valid and has access to the content.
+- The client can access `api.bilibili.com`.
 
-Bilibili 返回的画质取决于账号权限、视频本身和当前播放接口结果。插件只会展示接口实际返回的画质，默认画质不会提升账号本身没有的权限。
+### Only some qualities are listed
 
-清单中选定的画质请求失败时直接报错，不改用默认画质接口。画质枚举失败的分集仍保留可重试条目，并记录失败数；画质条目超过宿主 1000 项上限时，每集收敛为最高可用画质并记录缩减前后数量。订阅的部分失败、元数据缺失和最近分集范围限制也会写入诊断日志，不写 Cookie 或原始请求错误。
+The qualities Bilibili returns depend on account permissions, the video, and the current playback API response. The plugin lists only the qualities actually returned by the API; the default quality cannot grant permissions the account does not have.
 
-DASH 使用 MP4 视频与兼容的音频轨（按 MIME 判断，缺少元数据时沿用既有行为）；HEVC/AV1 的 MP4 流仍受支持。明确返回非 MP4 视频或仅提供不兼容音轨时会报错，不把它们伪装为 MP4 或静默丢弃音频。当前没有可靠的语言多音轨选择契约，仍按可用兼容音轨的带宽选择，不提供语言偏好设置。
+A failed request for a selected list quality reports an error rather than switching to the default-quality API. Episodes whose quality enumeration fails remain as retryable entries, and the failure count is recorded. When quality entries exceed the host's 1000-item limit, each episode is reduced to its highest available quality, with counts before and after reduction recorded. Partial subscription failures, missing metadata, and recent-episode range limits are also recorded in diagnostic logs; Cookies and raw request errors are not logged.
 
-### 下载地址很快失效
+DASH video uses MP4. AVC / HEVC / AV1 and audio tiers can be selected in settings; independent audio is named according to its actual container, and FLAC is not mislabeled as M4A. Subtitles download only tracks provided by Bilibili; there is no local transcription. ASS renders ordinary scrolling, reverse scrolling, top, and bottom danmaku; original XML preserves site-provided content.
 
-播放地址是短期直链。插件将其标记为临时地址，建议在解析完成后尽快开始下载；如果任务长时间暂停后失败，可以重新解析或重试任务。
+### Download URLs expire quickly
 
-## 文件
+Playback URLs are short-lived. FluxDown re-resolves them on start or resume. Hosts supporting this protocol version can also refresh a rejected route during download and try that route's fallback CDN on network errors.
 
-- `manifest.json`：插件身份、匹配规则、设置项和入口声明。
-- `resolve.js`：Bilibili 番剧分集发现、Cookie 处理、DASH/FLV 地址解析和画质选择逻辑。
-- `auth.js`：二维码登录会话、轮询和认证档案保存。
-- `main.js`：可移植二维码登录视图及本地 PNG 编码，无第三方二维码图片请求。
+## Files
 
-## 版本
+- `manifest.json`: plugin identity, match rules, settings, and entry declarations.
+- `resolve.js`: Bilibili series episode discovery, Cookie handling, DASH/FLV URL resolution, and quality selection.
+- `auth.js`: QR login session, polling, and auth profile storage.
+- `main.js`: portable QR login view and local PNG encoding, with no third-party QR image request.
 
-当前版本：`1.1.1`
+## Version
 
-`1.1.1`：移除订阅级重复配置，番剧与 UP 主订阅统一跟随插件设置；旧订阅保存的 `providerConfig` 不再覆盖这些设置。
+Current version: `1.2.0`
 
-`1.1.0`：统一扫码与手动 Cookie 的认证档案语义；移除无效的会话复用开关；支持订阅级 providerConfig；修正 Cookie 域过滤、画质回退和清单路径长度限制；拒绝不完整的多段 durl。
+`1.2.0`: regular multi-part and UGC collection selection; covers, human/AI subtitles, and danmaku; audio and codec preferences; library and share-text input; per-track direct URL recovery and fallback CDN.
 
-修复补充：指定画质失败不再换默认接口；登录状态增加服务端校验；校验 DASH 媒体 MIME，拒绝不兼容容器；补充清单画质缩减和逐项失败诊断。
+`1.1.1`: removed duplicate subscription-level settings, made series and UP creator subscriptions follow plugin settings; old subscriptions' saved `providerConfig` no longer overrides these settings.
 
-认证清理兼容修复：FD 的 `flux.storage` 只提供 `get/set`，旧 Cookie 缓存以 `set('auth.cookie', '')` 清空，登录保存和注销不再调用不存在的 `storage.remove`。认证档案仍通过 `flux.auth.remove` 删除；测试替身与宿主 API 保持一致。
+`1.1.0`: unified auth profile semantics for QR and manual Cookie login; removed an ineffective session reuse toggle; added subscription-level `providerConfig`; fixed Cookie domain filtering, quality fallback, and manifest path length limits; rejects incomplete multi-segment durl.
 
-登录视图：声明 `contributes.views[].location = "auth"`，GPUI 与 Web 共用二维码和登录成功页；打开时恢复有效登录态，扫码成功后停留在成功页，显式重新扫码才生成新二维码，关闭时清理会话，最低 FD 版本为 `0.6.4`。
+Fixes: selected-quality failures no longer switch to the default API; login status gains server-side validation; DASH media MIME is validated and incompatible containers are rejected; added diagnostics for quality-list reduction and individual failures.
 
-## UP 主投稿订阅
+Auth cleanup compatibility fix: FD's `flux.storage` provides only `get/set`; old Cookie cache is cleared with `set('auth.cookie', '')`, and login save/logout no longer call the nonexistent `storage.remove`. Auth profiles are still removed through `flux.auth.remove`; test doubles match the host API.
 
-在 RSS/订阅向导中选择 bilibili-bangumi，地址填写 UP 主空间，例如：
+Login view: declares `contributes.views[].location = "auth"`; GPUI and Web share QR and login-success pages. It restores a valid login state on opening, stays on the success page after scanning, creates a new QR only when explicitly requested, and cleans up the session on close. Minimum FD version was `0.6.4`.
 
+## UP creator subscriptions
+
+In the RSS/subscription wizard, choose `bilibili-bangumi` and enter a creator space, for example:
+
+```text
 https://space.bilibili.com/123456
+```
 
-每轮最多读取最新 20 条投稿；画质和「优先最高画质」统一跟随插件设置，按 bvid + cid 生成稳定条目；核心负责轮询和去重。直播回放、合集订阅和高级关键词过滤暂不支持。投稿列表使用 Bilibili WBI 签名接口；插件会缓存并自动刷新 WBI key，登录 Cookie 继续复用现有认证设置。
+Each poll reads at most the 20 newest submissions. Quality and **Prefer Highest Quality** follow plugin settings, and stable entries are generated by bvid + cid; the core handles polling and deduplication. Live replays, collection subscriptions, and advanced keyword filtering are not supported. Submission lists use Bilibili's WBI-signed API; the plugin caches and automatically refreshes the WBI key, reusing the existing auth Cookie settings.
 
-## 源码结构
+## Source structure
 
-运行时入口仍是根目录的 `resolve.js`，源码按职责拆分在 `src/`：
+The runtime entry remains the root `resolve.js`; source is split by responsibility in `src/`:
 
-- `runtime.js`：插件运行时、Cookie、HTTP 和 Bilibili API 基础能力
-- `bangumi.js`：番剧分集发现和番剧单集解析
-- `dash.js`：DASH、音频轨、画质和下载结果处理
-- `subscriptions.js`：番剧订阅和 UP 主投稿订阅
-- `entry.js`：对 FluxDown 暴露的 `resolve` 和 `subscribe` 入口
-- `auth-view.js`：二维码视图状态与会话生命周期
-- `qr-image.js`：沙箱内 PNG 编码；QR 矩阵复用 FD 已有 node-qrcode 1.5.4 编码器（`vendor/qrcode.js`，许可见 `vendor/LICENSE-qrcode`）
+- `runtime.js`: plugin runtime, Cookie, HTTP, and Bilibili API fundamentals
+- `bangumi.js`: series episode discovery and individual episode parsing
+- `dash.js`: DASH, audio tracks, quality, and download result handling
+- `subscriptions.js`: series and UP creator subscriptions
+- `entry.js`: `resolve` and `subscribe` entry points exposed to FluxDown
+- `resources.js`: supplementary resource lists, subtitle metadata, and SRT/ASS conversion
+- `input.js`, `library-view.js`: ID and share-text normalization, library activity view
+- `auth-view.js`: QR view state and session lifecycle
+- `qr-image.js`: sandbox PNG encoding; QR matrix uses FD's existing node-qrcode 1.5.4 encoder (`vendor/qrcode.js`, license in `vendor/LICENSE-qrcode`)
 
-修改源码后，在插件目录执行：
+After modifying source, run this in the plugin directory:
 
 ```text
 node scripts/build.mjs
 ```
 
-该命令会重新生成根目录的 `resolve.js` 和 `main.js`，安装插件时使用 `manifest.json` 声明的入口。
+This regenerates root `resolve.js` and `main.js`; the installed plugin uses the entries declared in `manifest.json`.
 
-## 短链
+## Short links
 
-可直接输入 `https://b23.tv/...` 或 `https://bili2233.cn/...`。普通视频短链进入视频解析；番剧短链返回分集清单。订阅向导也可使用指向番剧或 UP 主空间的短链。
+Enter `https://b23.tv/...` or `https://bili2233.cn/...` directly. A regular video short link uses video parsing; a series short link returns an episode list. The subscription wizard also accepts short links pointing to a series or creator space.
 
-宿主自动跟随重定向，但不向插件提供最终 URL，因此插件从落地页的 canonical / Open Graph 元数据读取目标，不执行页面脚本。视频落地页包含分 P 状态时会保留该选择。
+The host follows redirects but does not provide the final URL to the plugin. The plugin reads the target from canonical / Open Graph metadata on the landing page and does not execute page scripts. If the video landing page includes part-selection state, it is preserved.
 
-验证码、被截断的页面、缺少规范链接的页面和不支持的活动页会明确报错；此时可在浏览器打开短链，再复制完整地址。短链展开阶段不携带任务 Cookie；后续视频和番剧解析继续使用原有登录态。
+Captcha pages, truncated pages, pages without canonical links, and unsupported activity pages return an explicit error. In those cases, open the short link in a browser and copy the full URL. Short-link expansion does not carry task Cookies; subsequent video and series parsing continues to use the existing login state.
 
-回归检查（在插件目录执行）：
+Regression checks (run in the plugin directory):
 
 ```text
 node scripts/build.mjs

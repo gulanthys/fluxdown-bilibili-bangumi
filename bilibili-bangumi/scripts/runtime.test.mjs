@@ -7,11 +7,12 @@ import assert from 'node:assert/strict';
 const runtimeSource = readFileSync(fileURLToPath(new URL('../src/runtime.js', import.meta.url)), 'utf8');
 const runtimeContext = { Date, Array, Object, String, Math };
 const runtime = vm.runInNewContext(`${runtimeSource}\n({ cookieHeaderFromNetscape, fitManifestItems, cookieFromAuthProfile })`, runtimeContext);
+const identity = JSON.parse(readFileSync(new URL('../manifest.json', import.meta.url), 'utf8')).identity;
 
 test('credential lookup never reuses a profile bound to another Bilibili host', async () => {
   const calls = [];
   runtimeContext.flux = {
-    storage: { get: async () => JSON.stringify(['fluxdown@bilibili-bangumi::https://www.bilibili.com']) },
+    storage: { get: async () => JSON.stringify([`${identity}::https://www.bilibili.com`]) },
     auth: { get: async (ref) => { calls.push(ref); return { cookies: 'SESSDATA=wrong-host' }; } },
   };
   assert.equal(await runtime.cookieFromAuthProfile(), '');

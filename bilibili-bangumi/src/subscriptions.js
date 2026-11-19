@@ -181,6 +181,51 @@ function ordinaryVideoMetadata(ctx) {
   if (ctx.collectionTitle) metadata.collectionTitle = String(ctx.collectionTitle);
   return metadata;
 }
+
+function ordinaryVideoContext(ctx, view) {
+  return Object.assign({}, ctx, {
+    creatorId: String(view.owner && view.owner.mid || ''),
+    creatorName: String(view.owner && view.owner.name || ''),
+    collectionId: String(view.ugc_season && view.ugc_season.id || ''),
+    collectionTitle: String(view.ugc_season && view.ugc_season.title || ''),
+  });
+}
+
+function ordinaryVideoParts(view, explicitPage) {
+  var pages = Array.isArray(view.pages) ? view.pages : [];
+  if (explicitPage && (!pages[explicitPage - 1] || !Number(pages[explicitPage - 1].cid))) {
+    throw new Error('Bilibili 未返回指定分 P 的视频信息');
+  }
+  var title = view.title || view.bvid;
+  var parts = [], seen = new Set();
+  function add(bvid, aid, cid, name, path, cover) {
+    if (!/^BV[0-9a-z]+$/i.test(String(bvid || '')) || !/^[1-9]\d*$/.test(String(cid || ''))) return;
+    var id = 'video:' + bvid + ':cid:' + cid;
+    if (seen.has(id)) return;
+    seen.add(id);
+    parts.push({ id: id, bvid: bvid, aid: aid, cid: cid, title: sanitizeFileName(name || bvid), path: path, cover: cover });
+  }
+  var sections = !explicitPage && view.ugc_season && Array.isArray(view.ugc_season.sections) ? view.ugc_season.sections : [];
+  for (var section of sections) {
+    if (!section || !Array.isArray(section.episodes)) continue;
+    var path = section.title ? sanitizePath(section.title) : '';
+    for (var episode of section.episodes) {
+      if (!episode) continue;
+      var arc = episode.arc || {};
+      var page = episode.page || {};
+      add(episode.bvid || arc.bvid, episode.aid || arc.aid, episode.cid || page.cid || arc.first_cid,
+        episode.title || page.part || arc.title, path, arc.pic || page.first_frame);
+    }
+  }
+  for (var i = 0; i < pages.length; i++) {
+    if (!pages[i] || (explicitPage && i !== explicitPage - 1)) continue;
+    var name = pages.length > 1 ? title + ' - P' + (i + 1) + ' ' + String(pages[i].part || '') : title;
+    add(view.bvid, view.aid, pages[i].cid, name, '', pages[i].first_frame || view.pic);
+  }
+  if (!parts.length) throw new Error('Bilibili 未返回可下载的普通视频分 P');
+  if (parts.length > MAX_EPISODES) throw new Error('Bilibili 视频分 P 或合集超过 FluxDown 单次 1000 项上限；请用 ?p=N 下载单 P');
+  return parts;
+}
 async function resolveVideoPage(ctx) {
   var url = String(ctx.url || '').trim();
   var match = /^https?:\/\/(?:(?:www|m)\.)?bilibili\.com\/video\/(BV[0-9a-z]+|av\d+)\/?(?:[?#]|$)/i.exec(url);
@@ -190,28 +235,30 @@ async function resolveVideoPage(ctx) {
   var cookie = await effectiveCookie(ctx);
   var view = await apiGet('/x/web-interface/view?' + lookup, ctx, cookie);
   var pageMatch = /[?&]p=([^&#]*)/i.exec(url.split('#')[0]);
-  var pageNumber = pageMatch ? Number(pageMatch[1]) : 1;
-  if (!Number.isInteger(pageNumber) || pageNumber < 1) throw new Error('Bilibili 视频分 P 参数非法');
-  var pages = Array.isArray(view.pages) ? view.pages : [];
-  var page = pages[pageNumber - 1];
-  if (!page || !Number(page.cid) || !view.bvid) throw new Error('Bilibili 未返回指定分 P 的视频信息');
-  var title = String(view.title || view.bvid);
-  if (pages.length > 1) title += ' - P' + pageNumber + ' ' + String(page.part || '');
-  return await resolveUploaderVideo(Object.assign({}, ctx, {
-    title: title,
-    creatorId: String(view.owner && view.owner.mid || ''),
-    creatorName: String(view.owner && view.owner.name || ''),
-    collectionId: String(view.ugc_season && view.ugc_season.id || ''),
-    collectionTitle: String(view.ugc_season && view.ugc_season.title || ''),
-    resolverItem: 'video:' + view.bvid + ':cid:' + String(page.cid),
-  }));
+  var pageNumber = pageMatch ? Number(pageMatch[1]) : 0;
+  if (pageMatch && (!/^[1-9]\d*$/.test(pageMatch[1]) || !Number.isSafeInteger(pageNumber))) {
+    throw new Error('Bilibili 视频分 P 参数非法');
+  }
+  var parts = ordinaryVideoParts(view, pageNumber);
+  var context = ordinaryVideoContext(ctx, view);
+  var kinds = selectedBiliResources();
+  if (parts.length === 1 && !kinds.length) {
+    return await resolveUploaderVideo(Object.assign(context, { title: parts[0].title, resolverItem: parts[0].id }), cookie);
+  }
+  var audioOnly = setting('quality', 'best') === 'audio';
+  var items = parts.map(function(part) {
+    return { id: part.id, name: part.title + (audioOnly ? ' [audio]' : '.mp4'), path: part.path, size: 0, kind: 'file' };
+  });
+  items = await withBiliResourceItems(ctx, items, parts, cookie, kinds);
+  var title = sanitizeFileName(context.collectionTitle || view.title || view.bvid);
+  return { manifest: { name: title, items: fitManifestItems(items), archiveMetadata: ordinaryVideoMetadata(context) } };
 }
 
-async function resolveUploaderVideo(ctx) {
+async function resolveUploaderVideo(ctx, knownCookie) {
   var match = /^video:([^:]+):cid:(\d+)(?:@q:(\d+|h\d+))?$/.exec(String(ctx.resolverItem || ''));
   if (!match) throw new Error('Bilibili 投稿视频标识非法: ' + String(ctx.resolverItem || ''));
   var video = { bvid: match[1], cid: Number(match[2]) }, qualityKey = match[3] || '';
-  var cookie = await effectiveCookie(ctx);
+  var cookie = knownCookie == null ? await effectiveCookie(ctx) : knownCookie;
   var requestedQualityId = /^\d+$/.test(qualityKey) ? Number(qualityKey) : 0;
   var play = await apiGet(videoPlayUrl(video, requestedQualityId), ctx, cookie);
   var resolvedTitle = '';
@@ -229,28 +276,13 @@ async function resolveUploaderVideo(ctx) {
     resultContext.collectionId = String(resolvedView.ugc_season.id || '');
     resultContext.collectionTitle = String(resolvedView.ugc_season.title || '');
   }
+  var pages = resolvedView && Array.isArray(resolvedView.pages) ? resolvedView.pages : [];
+  var pageIndex = pages.findIndex(function(page) { return page && Number(page.cid) === video.cid; });
+  if (resolvedTitle && pages.length > 1 && pageIndex >= 0) {
+    resolvedTitle += ' - P' + (pageIndex + 1) + ' ' + String(pages[pageIndex].part || '');
+  }
   var title = sanitizeFileName(String(ctx.title || resolvedTitle || video.bvid));
-  var headers = requestHeaders(cookie, ctx), dash = play.dash || {};
-  var audios = Array.isArray(dash.audio) ? dash.audio : [], audio = pickAudioTrack(audios);
-  var variants = buildVariantsFromPlay(play, title);
-  var chosenIndex = qualityKey ? chooseVariantIndex(variants, qualityKey) : chooseDashIndex(variants, String(setting('quality', 'best')));
-  if (qualityKey) {
-    if (chosenIndex < 0 || !variants[chosenIndex]) throw new Error('Bilibili 未返回所选画质: ' + qualityKey);
-    var fixed = variants[chosenIndex];
-    var fixedResult = { url: fixed.url, fileName: fixed.fileName, totalBytes: fixed.totalBytes, extraHeaders: headers, ephemeral: true, rangeSupported: true, archiveMetadata: ordinaryVideoMetadata(resultContext) };
-    return fixedResult;
-  }
-  if (String(setting('quality', 'best')) === 'audio') {
-    if (!audio) throw new Error('Bilibili 当前没有独立音频轨');
-    return { url: audioUrl(audio), fileName: title + ' [audio].m4a', totalBytes: streamSize(audio), extraHeaders: headers, ephemeral: true, rangeSupported: true, archiveMetadata: ordinaryVideoMetadata(resultContext) };
-  }
-  if (variants.length) {
-    var chosen = variants[chosenIndex] || variants[0];
-    var result = { url: chosen.url, fileName: chosen.fileName, totalBytes: chosen.totalBytes, extraHeaders: headers, ephemeral: true, rangeSupported: true, variants: variants, defaultVariantIndex: chosenIndex, archiveMetadata: ordinaryVideoMetadata(resultContext) };
-    if (chosen.audioUrl) result.audioUrl = chosen.audioUrl;
-    return result;
-  }
-  throw new Error('Bilibili 投稿播放接口未返回 DASH 地址');
+  return resolvePlayResult(play, title, qualityKey, requestHeaders(cookie, ctx), ordinaryVideoMetadata(resultContext));
 }
 
 async function subscribeBangumi(ctx) {

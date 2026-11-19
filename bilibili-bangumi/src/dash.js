@@ -7,6 +7,21 @@ function streamUrl(stream) {
   return '';
 }
 
+function streamBackups(stream) {
+  var primary = streamUrl(stream);
+  var backups = stream && (stream.backup_url || stream.backupUrl);
+  if (!Array.isArray(backups)) return [];
+  var distinct = new Set([primary]);
+  var output = [];
+  for (var url of backups) {
+    if (typeof url !== 'string' || !/^https:\/\/[^\/\s@?#]+(?:[/?#]|$)/i.test(url) || distinct.has(url)) continue;
+    distinct.add(url);
+    output.push(url);
+    if (output.length === 4) break;
+  }
+  return output;
+}
+
 function audioUrl(stream) {
   return streamUrl(stream);
 }
@@ -44,6 +59,58 @@ function pickAudioTrack(audios) {
   return best;
 }
 
+var AUDIO_LEVELS = [30216, 30232, 30280, 30250, 30251];
+
+function dashAudioTrack(dash) {
+  var regular = Array.isArray(dash.audio) ? dash.audio : [];
+  var preferred = String(setting('audioQuality', 'auto'));
+  if (preferred === 'auto') return pickAudioTrack(regular);
+  var target = AUDIO_LEVELS.indexOf(Number(preferred));
+  var tracks = regular.slice();
+  if (dash.dolby && Array.isArray(dash.dolby.audio)) {
+    for (var dolby of dash.dolby.audio) {
+      if (dolby) tracks.push(Object.assign({}, dolby, { id: 30250 }));
+    }
+  }
+  if (dash.flac && dash.flac.audio) tracks.push(Object.assign({}, dash.flac.audio, { id: 30251 }));
+  var best = null, bestDistance = Infinity, bestBandwidth = -1;
+  for (var track of tracks) {
+    if (!track || !streamUrl(track)) continue;
+    var rank = AUDIO_LEVELS.indexOf(Number(track.id));
+    if (!isMp4CompatibleAudio(track) && !(rank === 4 && mediaMime(track) === 'audio/flac')) continue;
+    var distance = rank < 0 ? AUDIO_LEVELS.length * 2 :
+      rank <= target ? target - rank : AUDIO_LEVELS.length + rank - target;
+    var bandwidth = Number(track.bandwidth) || 0;
+    if (distance < bestDistance || (distance === bestDistance && bandwidth > bestBandwidth)) {
+      best = track;
+      bestDistance = distance;
+      bestBandwidth = bandwidth;
+    }
+  }
+  return best || pickAudioTrack(regular);
+}
+
+function audioFileExtension(audio) {
+  if (Number(audio.id) === 30251) return mediaMime(audio) === 'audio/flac' ? 'flac' : 'mp4';
+  return 'm4a';
+}
+
+function audioOnlyVariant(audio, title) {
+  var extension = audioFileExtension(audio);
+  return {
+    label: '仅音频 (' + extension.toUpperCase() + ')',
+    url: audioUrl(audio),
+    audioUrl: '',
+    backupUrls: streamBackups(audio),
+    fileName: title + ' [audio].' + extension,
+    totalBytes: streamSize(audio),
+    bandwidth: Number(audio.bandwidth) || 0,
+    width: 0,
+    height: 0,
+    container: extension,
+  };
+}
+
 function videoContainer(video) {
   var mime = mediaMime(video);
   if (!mime || mime === 'video/mp4') return 'mp4';
@@ -64,14 +131,21 @@ function videoQualityTag(video, height) {
   return width ? height + 'p-' + width + 'x' + height : height + 'p';
 }
 
-// Bilibili can return several codecs for one quality id. Prefer AVC because
-// it has the widest hardware/player compatibility; HEVC and AV1 remain
-// available as fallbacks when AVC is not present.
-function videoCodecScore(video) {
-  var codecs = String(video && video.codecs || video && video.codecs_name || '').toLowerCase();
-  if (/avc1|avc3/.test(codecs)) return 3;
-  if (/hev1|hvc1/.test(codecs)) return 2;
-  if (/av01/.test(codecs)) return 1;
+function videoCodec(video) {
+  var codecs = String(video && (video.codecs || video.codecs_name) || '').toLowerCase();
+  var id = Number(video && video.codecid);
+  if (/avc1|avc3|h264|avc/.test(codecs) || id === 7) return 'avc';
+  if (/hev1|hvc1|hevc|h265/.test(codecs) || id === 12) return 'hevc';
+  if (/av01|av1/.test(codecs) || id === 13) return 'av1';
+  return '';
+}
+
+function videoCodecScore(video, preferred) {
+  var codec = videoCodec(video);
+  if (codec && codec === preferred) return 4;
+  if (codec === 'avc') return 3;
+  if (codec === 'hevc') return 2;
+  if (codec === 'av1') return 1;
   return 0;
 }
 
@@ -85,7 +159,7 @@ function videoQualityLabel(video, height, play) {
   return label;
 }
 
-function buildDashVariants(videos, audio, title, play) {
+function buildDashVariants(videos, audio, title, play, preferredCodec) {
   var candidates = [];
   var seen = {};
   for (var i = 0; i < videos.length; i++) {
@@ -98,8 +172,8 @@ function buildDashVariants(videos, audio, title, play) {
     var previousIndex = seen[key];
     if (previousIndex != null) {
       var previous = candidates[previousIndex];
-      var currentScore = videoCodecScore(video);
-      var previousScore = videoCodecScore(previous.video);
+      var currentScore = videoCodecScore(video, preferredCodec);
+      var previousScore = videoCodecScore(previous.video, preferredCodec);
       if (currentScore > previousScore ||
           (currentScore === previousScore &&
             (Number(video.bandwidth) || 0) > (Number(previous.video.bandwidth) || 0))) {
@@ -125,6 +199,8 @@ function buildDashVariants(videos, audio, title, play) {
     var variant = {
       label: label,
       url: streamUrl(video),
+      backupUrls: streamBackups(video),
+      audioUrl: '',
       fileName: title + ' [' + tag + '].' + container,
       qualityId: Number(video.id) || Number(video.quality) || 0,
       totalBytes: streamSize(video) + streamSize(audio),
@@ -133,21 +209,13 @@ function buildDashVariants(videos, audio, title, play) {
       height: item.height,
       container: container,
     };
-    if (audio) variant.audioUrl = audioUrl(audio);
+    if (audio) {
+      variant.audioUrl = audioUrl(audio);
+      variant.audioBackupUrls = streamBackups(audio);
+    }
     variants.push(variant);
   }
-  if (audio && variants.length < MAX_VARIANTS) {
-    variants.push({
-      label: 'Audio only (m4a)',
-      url: audioUrl(audio),
-      fileName: title + ' [audio].m4a',
-      totalBytes: streamSize(audio),
-      bandwidth: Number(audio.bandwidth) || 0,
-      width: 0,
-      height: 0,
-      container: 'm4a',
-    });
-  }
+  if (audio && variants.length < MAX_VARIANTS) variants.push(audioOnlyVariant(audio, title));
   return variants;
 }
 
@@ -201,6 +269,7 @@ function buildDurlVariants(play, title) {
       label: label,
       qualityId: item.qualityId,
       url: String(item.part.url),
+      backupUrls: streamBackups(item.part),
       fileName: title + ' [' + tag + '].' + format,
       totalBytes: Number(item.part.size) > 0 ? Number(item.part.size) : 0,
       bandwidth: item.bandwidth,
@@ -215,9 +284,35 @@ function buildDurlVariants(play, title) {
 function buildVariantsFromPlay(play, title) {
   var dash = play && play.dash ? play.dash : {};
   var videos = Array.isArray(dash.video) ? dash.video : [];
-  var audios = Array.isArray(dash.audio) ? dash.audio : [];
-  var dashVariants = buildDashVariants(videos, pickAudioTrack(audios), title, play);
+  var dashVariants = buildDashVariants(videos, dashAudioTrack(dash), title, play, String(setting('videoCodec', 'auto')));
   return dashVariants.length ? dashVariants : buildDurlVariants(play || {}, title);
+}
+
+function mediaResolveResult(variant, headers, archiveMetadata) {
+  return {
+    url: variant.url, audioUrl: variant.audioUrl || '', fileName: variant.fileName,
+    totalBytes: variant.totalBytes, backupUrls: variant.backupUrls,
+    audioBackupUrls: variant.audioBackupUrls, extraHeaders: headers,
+    ephemeral: true, rangeSupported: true, archiveMetadata: archiveMetadata,
+  };
+}
+
+function resolvePlayResult(play, title, qualityKey, headers, archiveMetadata) {
+  var quality = String(setting('quality', 'best'));
+  if (!qualityKey && quality === 'audio') {
+    var audio = dashAudioTrack(play.dash || {});
+    if (!audio) throw new Error('Bilibili 当前没有独立音频轨');
+    return mediaResolveResult(audioOnlyVariant(audio, title), headers, archiveMetadata);
+  }
+  var variants = buildVariantsFromPlay(play, title);
+  var chosenIndex = qualityKey ? chooseVariantIndex(variants, qualityKey) : chooseDashIndex(variants, quality);
+  if (chosenIndex < 0) throw new Error('Bilibili 未返回所选画质: ' + qualityKey);
+  var result = mediaResolveResult(variants[chosenIndex], headers, archiveMetadata);
+  if (!qualityKey) {
+    result.variants = variants;
+    result.defaultVariantIndex = chosenIndex;
+  }
+  return result;
 }
 
 function buildManifestVariantsFromPlay(play, title) {

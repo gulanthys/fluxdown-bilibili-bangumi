@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const pluginDir = join(here, "..");
 const sourceDir = join(pluginDir, "src");
-const parts = ["runtime.js", "bangumi.js", "dash.js", "subscriptions.js", "entry.js"];
+const parts = ["runtime.js", "bangumi.js", "dash.js", "subscriptions.js", "resources.js", "entry.js"];
 const output = parts.map((name) => readFileSync(join(sourceDir, name), "utf8").trimEnd()).join("\n\n") + "\n";
 writeFileSync(join(pluginDir, "resolve.js"), output, "utf8");
 console.log(`built resolve.js from ${parts.length} source files`);
@@ -14,9 +14,12 @@ const mainParts = [
   join(pluginDir, "auth.js"),
   join(pluginDir, "vendor", "qrcode.js"),
   join(sourceDir, "qr-image.js"),
+  join(sourceDir, "i18n.js"),
   join(sourceDir, "auth-view.js"),
 ];
 const license = readFileSync(join(pluginDir, "vendor", "LICENSE-qrcode"), "utf8");
-const main = "/*\n" + license + "*/\n" + mainParts.map((path) => readFileSync(path, "utf8").trimEnd()).join("\n\n") + "\n";
+const library = ["runtime.js", "input.js", "library-view.js"].map((name) => readFileSync(join(sourceDir, name), "utf8").trimEnd()).join("\n\n");
+const main = "/*\n" + license + "*/\n" + mainParts.map((path) => readFileSync(path, "utf8").trimEnd()).join("\n\n")
+  + "\n\n;(function () {\n" + library + "\n})();\n";
 writeFileSync(join(pluginDir, "main.js"), main, "utf8");
-console.log("built main.js with portable QR login view");
+console.log("built main.js with portable QR login and content library views");

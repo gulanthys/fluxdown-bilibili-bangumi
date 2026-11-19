@@ -5,6 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 const source = readFileSync(fileURLToPath(new URL('../auth.js', import.meta.url)), 'utf8');
+const identity = JSON.parse(readFileSync(new URL('../manifest.json', import.meta.url), 'utf8')).identity;
 const QR_URL = 'https:// bili.invalid/qr';
 
 function runtime(options = {}) {
@@ -24,7 +25,7 @@ function runtime(options = {}) {
       save: async (profile) => {
         calls.saves.push(profile);
         if (options.failSave?.(profile)) throw new Error('save unavailable');
-        const ref = `fluxdown@bilibili-bangumi::${profile.site}`;
+        const ref = `${identity}::${profile.site}`;
         profiles.set(ref, profile);
         return ref;
       },
@@ -73,13 +74,13 @@ test('primary site save failure is reported while successful refs remain persist
   const begin = await run(r.context, 'begin', { input: 'qr' });
   await assert.rejects(run(r.context, 'poll', { sessionId: begin.sessionId }), /api\.bilibili\.com/);
   assert.deepEqual(JSON.parse(r.storage.get('auth.refs')), [
-    'fluxdown@bilibili-bangumi::https://passport.bilibili.com',
-    'fluxdown@bilibili-bangumi::https://www.bilibili.com',
+    `${identity}::https://passport.bilibili.com`,
+    `${identity}::https://www.bilibili.com`,
   ]);
 });
 
 test('failed profile deletion keeps only failed refs for retry', async () => {
-  const ref = 'fluxdown@bilibili-bangumi::https://api.bilibili.com';
+  const ref = `${identity}::https://api.bilibili.com`;
   let fail = true;
   const r = runtime({ initial: { 'auth.refs': JSON.stringify([ref]), 'auth.cookie': 'legacy-secret', [ 'bilibili.auth.session' ]: '{"kind":"qrcode"}' }, failRemove: () => fail });
   assert.equal((await run(r.context, 'logout')).status, 'error');
@@ -99,13 +100,13 @@ test('expired QR is not pending and old cookie cache is cleaned during status', 
 });
 
 test('status ignores expired SESSDATA profiles', async () => {
-  const ref = 'fluxdown@bilibili-bangumi::https://api.bilibili.com';
+  const ref = `${identity}::https://api.bilibili.com`;
   const r = runtime({ initial: { 'auth.refs': JSON.stringify([ref]) } });
   r.profiles.set(ref, { cookies: 'SESSDATA=expired', expiresAt: Math.floor(Date.now() / 1000) - 1 });
   assert.equal((await run(r.context, 'status')).status, 'error');
 });
 test('status checks nav with the API profile credentials and succeeds only when logged in', async () => {
-  const ref = 'fluxdown@bilibili-bangumi::https://api.bilibili.com';
+  const ref = `${identity}::https://api.bilibili.com`;
   const r = runtime({ initial: { 'auth.refs': JSON.stringify([ref]) } });
   r.profiles.set(ref, { cookies: 'SESSDATA=private', expiresAt: 0 });
   assert.equal((await run(r.context, 'status')).status, 'success');
@@ -115,7 +116,7 @@ test('status checks nav with the API profile credentials and succeeds only when 
 });
 
 test('status distinguishes revoked sessions from temporary API failures', async () => {
-  const ref = 'fluxdown@bilibili-bangumi::https://api.bilibili.com';
+  const ref = `${identity}::https://api.bilibili.com`;
   for (const payload of [{ code: -101 }, { code: 0, data: { isLogin: false } }, { code: -412 }, { code: 0 }]) {
     const r = runtime({ navPayload: payload });
     r.profiles.set(ref, { cookies: 'SESSDATA=private' });
@@ -129,7 +130,7 @@ test('status distinguishes revoked sessions from temporary API failures', async 
 });
 
 test('status reports network errors without removing the stored profile', async () => {
-  const ref = 'fluxdown@bilibili-bangumi::https://api.bilibili.com';
+  const ref = `${identity}::https://api.bilibili.com`;
   const r = runtime({ initial: { 'auth.refs': JSON.stringify([ref]) }, fetchError: true });
   r.profiles.set(ref, { cookies: 'SESSDATA=private', expiresAt: 0 });
   const result = await run(r.context, 'status');
