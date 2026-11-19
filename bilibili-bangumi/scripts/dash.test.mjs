@@ -92,13 +92,12 @@ test('requested audio falls back down before up, and FLAC is not mislabeled M4A'
   }
 });
 
-test('fixed DASH quality retains separate video and audio sources and mirrors', () => {
+test('fixed DASH quality retains separate video and audio sources', () => {
   const result = context.resolvePlayResult({ dash: {
     video: [{ id: 80, baseUrl: 'https://video.example/main',
       backupUrl: ['https://video.example/main', 'https://video.example/backup', 'http://video.example/insecure'] }],
     audio: [{ id: 30280, baseUrl: 'https://audio.example/main', backupUrl: ['https://audio.example/backup'] }],
   } }, 'video', '80', {}, {});
   assert.equal(result.audioUrl, 'https://audio.example/main');
-  assert.deepEqual(Array.from(result.backupUrls), ['https://video.example/backup']);
-  assert.deepEqual(Array.from(result.audioBackupUrls), ['https://audio.example/backup']);
+  assert.equal(result.url, 'https://video.example/main');
 });

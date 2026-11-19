@@ -1,5 +1,5 @@
 function selectedBiliResources() {
-  return ['cover', 'subtitles', 'aiSubtitles', 'danmakuXml', 'danmakuAss'].filter(function(kind) {
+  return ['cover', 'danmakuXml'].filter(function(kind) {
     return setting(kind, false) === true;
   });
 }

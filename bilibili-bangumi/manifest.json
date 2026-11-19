@@ -1,10 +1,10 @@
 {
   "identity": "gulanthys@bilibili-bangumi",
   "name": "Bilibili",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Bilibili video, series, and subscription support for FluxDown.",
   "homepage": "https://github.com/gulanthys/fluxdown-bilibili-bangumi",
-  "minAppVersion": "0.6.9",
+  "minAppVersion": "0.6.8",
   "permissions": ["auth", "tasks"],
   "auth": {
     "entry": "auth.js"
@@ -202,20 +202,8 @@
       "localizations": { "en": { "title": "List Covers" }, "zh-Hans": { "title": "列出封面" } }
     },
     {
-      "key": "subtitles", "title": "List Human Subtitles (SRT)", "type": "boolean", "widget": "toggle", "default": "false",
-      "localizations": { "en": { "title": "List Human Subtitles (SRT)" }, "zh-Hans": { "title": "列出人工字幕 (SRT)" } }
-    },
-    {
-      "key": "aiSubtitles", "title": "List Bilibili AI Subtitles (SRT)", "type": "boolean", "widget": "toggle", "default": "false",
-      "localizations": { "en": { "title": "List Bilibili AI Subtitles (SRT)" }, "zh-Hans": { "title": "列出 B 站 AI 字幕 (SRT)" } }
-    },
-    {
       "key": "danmakuXml", "title": "List XML Danmaku", "type": "boolean", "widget": "toggle", "default": "false",
       "localizations": { "en": { "title": "List XML Danmaku" }, "zh-Hans": { "title": "列出 XML 弹幕" } }
-    },
-    {
-      "key": "danmakuAss", "title": "List ASS Danmaku", "type": "boolean", "widget": "toggle", "default": "false",
-      "localizations": { "en": { "title": "List ASS Danmaku" }, "zh-Hans": { "title": "列出 ASS 弹幕" } }
     }
   ]
 }

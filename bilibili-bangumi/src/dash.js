@@ -7,21 +7,6 @@ function streamUrl(stream) {
   return '';
 }
 
-function streamBackups(stream) {
-  var primary = streamUrl(stream);
-  var backups = stream && (stream.backup_url || stream.backupUrl);
-  if (!Array.isArray(backups)) return [];
-  var distinct = new Set([primary]);
-  var output = [];
-  for (var url of backups) {
-    if (typeof url !== 'string' || !/^https:\/\/[^\/\s@?#]+(?:[/?#]|$)/i.test(url) || distinct.has(url)) continue;
-    distinct.add(url);
-    output.push(url);
-    if (output.length === 4) break;
-  }
-  return output;
-}
-
 function audioUrl(stream) {
   return streamUrl(stream);
 }
@@ -101,7 +86,6 @@ function audioOnlyVariant(audio, title) {
     label: '仅音频 (' + extension.toUpperCase() + ')',
     url: audioUrl(audio),
     audioUrl: '',
-    backupUrls: streamBackups(audio),
     fileName: title + ' [audio].' + extension,
     totalBytes: streamSize(audio),
     bandwidth: Number(audio.bandwidth) || 0,
@@ -199,7 +183,6 @@ function buildDashVariants(videos, audio, title, play, preferredCodec) {
     var variant = {
       label: label,
       url: streamUrl(video),
-      backupUrls: streamBackups(video),
       audioUrl: '',
       fileName: title + ' [' + tag + '].' + container,
       qualityId: Number(video.id) || Number(video.quality) || 0,
@@ -211,7 +194,6 @@ function buildDashVariants(videos, audio, title, play, preferredCodec) {
     };
     if (audio) {
       variant.audioUrl = audioUrl(audio);
-      variant.audioBackupUrls = streamBackups(audio);
     }
     variants.push(variant);
   }
@@ -269,7 +251,6 @@ function buildDurlVariants(play, title) {
       label: label,
       qualityId: item.qualityId,
       url: String(item.part.url),
-      backupUrls: streamBackups(item.part),
       fileName: title + ' [' + tag + '].' + format,
       totalBytes: Number(item.part.size) > 0 ? Number(item.part.size) : 0,
       bandwidth: item.bandwidth,
@@ -291,8 +272,7 @@ function buildVariantsFromPlay(play, title) {
 function mediaResolveResult(variant, headers, archiveMetadata) {
   return {
     url: variant.url, audioUrl: variant.audioUrl || '', fileName: variant.fileName,
-    totalBytes: variant.totalBytes, backupUrls: variant.backupUrls,
-    audioBackupUrls: variant.audioBackupUrls, extraHeaders: headers,
+    totalBytes: variant.totalBytes, extraHeaders: headers,
     ephemeral: true, rangeSupported: true, archiveMetadata: archiveMetadata,
   };
 }

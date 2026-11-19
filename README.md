@@ -6,7 +6,7 @@
 
 | FluxDown identity | 目录 | 版本 | 功能 |
 | --- | --- | --- | --- |
-| `gulanthys@bilibili-bangumi` | [`bilibili-bangumi/`](./bilibili-bangumi/) | `1.2.0` | 番剧、普通多 P 和 UGC 合集、附加资源、编码和音质选择、内容库、订阅与二维码登录（需要 FluxDown 0.6.9 或兼容开发构建） |
+| `gulanthys@bilibili-bangumi` | [`bilibili-bangumi/`](./bilibili-bangumi/) | `1.2.1` | FluxDown 0.6.8 兼容版：分 P、合集、封面和 XML 弹幕、编码和音质偏好、内容库、订阅与中英界面 |
 
 ## 目录结构
 

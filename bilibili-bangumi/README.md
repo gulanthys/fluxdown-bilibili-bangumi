@@ -15,7 +15,7 @@
 - Supports DASH video quality selection: best, 2160p, 1440p, 1080p, 720p, and 480p
 - Supports audio-only downloads, with container determined by the actual audio track; supports AVC, HEVC, AV1, and 64K, 132K, 192K, Dolby, and Hi-Res audio quality
 - Creates a separate download item for each available quality, retaining the original video name and appending the quality (for example, `[1080p-高清]`)
-- FluxDown merges audio and video; supplementary-resource settings allow covers, human/AI subtitles (SRT), and XML/ASS danmaku to be selected independently in episode lists
+- FluxDown merges audio and video; covers and original XML danmaku can be selected independently in episode lists.
 - Supports browser Cookie headers and Netscape `cookies.txt`, filtering Netscape cookies by Bilibili API domain
 - Supports the portable FD `auth` view: displays a Bilibili login QR code when signed out and a success state when signed in; the auth profile is reused for subsequent parsing
 - Supports `bilibili-bangumi` provider subscriptions for series and UP creator submissions; the host handles polling, deduplication, and download task creation
@@ -32,7 +32,7 @@ Portable views choose their language from the live host locale: every locale tag
 
 ## Requirements
 
-- FluxDown `0.6.9` or a development build with an equivalent plugin protocol; older hosts do not support this version's generated subtitle/ASS files and track fallback URLs.
+- FluxDown `0.6.8` or newer. This compatibility branch omits generated SRT subtitles, ASS danmaku, automatic DASH mirror switching, and per-track URL refresh.
 - Access to `api.bilibili.com`
 - A valid Bilibili Cookie for content requiring login
 - FFmpeg installed or configured in FluxDown component settings to merge DASH audio and video
@@ -57,7 +57,7 @@ After installing the plugin, configure these settings in the plugin card:
 | Default Quality | Default for regular links; shared quality ceiling for series and UP creator subscriptions | Best quality |
 | Video Codec Preference | AVC / HEVC / AV1; falls back to a compatible codec at the same quality when the selected codec is unavailable | Auto |
 | Audio Quality Preference | Selects 64K through Hi-Res; prefers a lower available tier if the selected tier is unavailable | Auto (standard audio) |
-| Covers, human subtitles, AI subtitles, XML / ASS danmaku | Individually controls supplementary resources in regular video, collection, and series lists | Off |
+| Covers and XML danmaku | Independently controls which attachments appear in regular video, collection, and series lists | Off |
 
 Explicit Cookies are saved in the local plugin configuration; QR login credentials are managed by the FluxDown auth profile. Do not share or submit Cookies. If they expire, scan again or import a valid Cookie.
 
@@ -123,7 +123,7 @@ Filter settings can still filter qualities by title, for example include `1080p|
 
 Check the following:
 
-- The client is at least version `0.6.9` (older clients can continue using plugin `1.1.3`).
+- The client is at least version `0.6.8` (older clients can continue using plugin `1.1.3`).
 - The plugin is enabled.
 - The Bilibili link is a supported series page, BV/AV regular video page, or corresponding short link.
 - The Bilibili Cookie is valid and has access to the content.
@@ -135,7 +135,7 @@ The qualities Bilibili returns depend on account permissions, the video, and the
 
 A failed request for a selected list quality reports an error rather than switching to the default-quality API. Episodes whose quality enumeration fails remain as retryable entries, and the failure count is recorded. When quality entries exceed the host's 1000-item limit, each episode is reduced to its highest available quality, with counts before and after reduction recorded. Partial subscription failures, missing metadata, and recent-episode range limits are also recorded in diagnostic logs; Cookies and raw request errors are not logged.
 
-DASH video uses MP4. AVC / HEVC / AV1 and audio tiers can be selected in settings; independent audio is named according to its actual container, and FLAC is not mislabeled as M4A. Subtitles download only tracks provided by Bilibili; there is no local transcription. ASS renders ordinary scrolling, reverse scrolling, top, and bottom danmaku; original XML preserves site-provided content.
+DASH video uses MP4. AVC / HEVC / AV1 and audio tiers can be selected in settings; independent audio uses the actual track container. XML preserves site-provided danmaku.
 
 ### Download URLs expire quickly
 
@@ -150,9 +150,9 @@ Playback URLs are short-lived. FluxDown re-resolves them on start or resume. Hos
 
 ## Version
 
-Current version: `1.2.0`
+Current version: `1.2.1`
 
-`1.2.0`: regular multi-part and UGC collection selection; covers, human/AI subtitles, and danmaku; audio and codec preferences; library and share-text input; per-track direct URL recovery and fallback CDN.
+`1.2.1`: FluxDown 0.6.8 compatibility release; retains the content library, collections, media preferences, cover and XML downloads, and bilingual settings and views.
 
 `1.1.1`: removed duplicate subscription-level settings, made series and UP creator subscriptions follow plugin settings; old subscriptions' saved `providerConfig` no longer overrides these settings.
 
@@ -183,7 +183,7 @@ The runtime entry remains the root `resolve.js`; source is split by responsibili
 - `dash.js`: DASH, audio tracks, quality, and download result handling
 - `subscriptions.js`: series and UP creator subscriptions
 - `entry.js`: `resolve` and `subscribe` entry points exposed to FluxDown
-- `resources.js`: supplementary resource lists, subtitle metadata, and SRT/ASS conversion
+- `resources.js`: cover and original XML danmaku downloads
 - `input.js`, `library-view.js`: ID and share-text normalization, library activity view
 - `auth-view.js`: QR view state and session lifecycle
 - `qr-image.js`: sandbox PNG encoding; QR matrix uses FD's existing node-qrcode 1.5.4 encoder (`vendor/qrcode.js`, license in `vendor/LICENSE-qrcode`)
