@@ -26,7 +26,7 @@
 
 ## Language support
 
-Settings use the host's manifest `localizations` fields for English (`en`) and Simplified Chinese (`zh-Hans`), including option labels localized by option value. Some host-rendered labels are fixed strings and cannot be localized by a plugin: the plugin name and description, activity/auth view titles, and other manifest labels without localization support use neutral branding or English instead.
+Settings use manifest `localizations` for English (`en`) and Simplified Chinese (`zh`), with option translations under each language’s `options` map keyed by option value. Plugin and activity names that the host cannot localize use neutral branding or English.
 
 Portable views choose their language from the live host locale: every locale tag beginning with `zh` (including regional tags and underscore variants) uses Simplified Chinese; all other locales, including an omitted locale, use English. Externally sourced titles and native resolver text are not automatically translated unless a locale-aware translation is explicitly provided; Bilibili-provided titles and host-rendered resolver text may therefore remain in their original language.
 
