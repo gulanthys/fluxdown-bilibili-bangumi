@@ -6,7 +6,7 @@
 
 | FluxDown identity | 目录 | 版本 | 功能 |
 | --- | --- | --- | --- |
-| `gulanthys@bilibili-bangumi` | [`bilibili-bangumi/`](./bilibili-bangumi/) | `1.2.1` | FluxDown 0.6.8 兼容版：分 P、合集、封面和 XML 弹幕、编码和音质偏好、内容库、订阅与中英界面 |
+| `gulanthys@bilibili-bangumi` | [`bilibili-bangumi/`](./bilibili-bangumi/) | `1.2.2` | FluxDown 0.6.8 兼容版：重设计 B 站活动页，支持封面、连续加载与批量选择 |
 
 ## 目录结构
 
@@ -31,12 +31,13 @@ plugin.fxplug
 ├── manifest.json
 ├── main.js
 ├── auth.js
-└── resolve.js
+├── resolve.js
+└── bilibili.svg
 ```
 
 安装器会读取并校验 `manifest.json`，然后将插件安装到 FluxDown 的插件目录中。开发目录安装则要求选择直接包含 `manifest.json` 的插件目录。
 
-当前 GPUI 与 Web 客户端可直接安装 `.fxplug`；发布包须包含 manifest 声明的 `resolve.js`、`auth.js` 和 `main.js`。
+当前 GPUI 与 Web 客户端可直接安装 `.fxplug`；发布包须包含 manifest 声明的 `resolve.js`、`auth.js`、`main.js` 和活动栏图标 `bilibili.svg`。
 
 ## 开发与维护流程
 

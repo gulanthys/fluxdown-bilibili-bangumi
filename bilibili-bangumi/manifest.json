@@ -1,7 +1,7 @@
 {
   "identity": "gulanthys@bilibili-bangumi",
   "name": "Bilibili",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Bilibili video, series, and subscription support for FluxDown.",
   "homepage": "https://github.com/gulanthys/fluxdown-bilibili-bangumi",
   "minAppVersion": "0.6.8",
@@ -10,12 +10,13 @@
     "entry": "auth.js"
   },
   "main": {
-    "entry": "main.js"
+    "entry": "main.js",
+    "imageHosts": ["i0.hdslb.com", "i1.hdslb.com", "i2.hdslb.com", "i3.hdslb.com"]
   },
   "contributes": {
     "views": [
       { "id": "login", "title": "Bilibili Login", "location": "auth" },
-      { "id": "library", "title": "Bilibili Library", "location": "activity" }
+      { "id": "library", "title": "Bilibili", "location": "activity", "icon": "bilibili.svg" }
     ]
   },
   "resolvers": [

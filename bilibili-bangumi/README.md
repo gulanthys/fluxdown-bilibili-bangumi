@@ -19,7 +19,7 @@
 - Supports browser Cookie headers and Netscape `cookies.txt`, filtering Netscape cookies by Bilibili API domain
 - Supports the portable FD `auth` view: displays a Bilibili login QR code when signed out and a success state when signed in; the auth profile is reused for subsequent parsing
 - Supports `bilibili-bangumi` provider subscriptions for series and UP creator submissions; the host handles polling, deduplication, and download task creation
-- The GPUI and Web “Bilibili Library” activity accepts IDs, links, or share text, and can enqueue items from watch history, favorites, likes, and UP creator collections
+- The GPUI and Web Bilibili activity shows available video durations, activity dates, and watch progress alongside covers, titles, and creators in a list with spaced rows. Use **Load more videos** at the end of the list to keep browsing without losing your place. Selections survive source and filter changes; the toolbar shows how many will be added as paused downloads. Submit direct URLs through FluxDown's New Download dialog.
 - Series and UP creator subscriptions share the plugin's quality and filtering settings
 - Truncates filenames to FluxDown's manifest path-length limit and numbers duplicate entries in the same directory
 - Regular video links support BV IDs and `av` plus numeric IDs; AV links use the video information API to read the corresponding BV ID and parts
@@ -34,6 +34,7 @@ Portable views choose their language from the live host locale: every locale tag
 
 - FluxDown `0.6.8` or newer. This compatibility branch omits generated SRT subtitles, ASS danmaku, automatic DASH mirror switching, and per-track URL refresh.
 - Access to `api.bilibili.com`
+- Account avatars and video covers use the host's session image loader and the declared `i0.hdslb.com`–`i3.hdslb.com` CDN hosts. Supporting hosts crop avatars to circles and round cover corners; older hosts keep the original shape. Videos remain selectable when a cover is missing.
 - A valid Bilibili Cookie for content requiring login
 - FFmpeg installed or configured in FluxDown component settings to merge DASH audio and video
 
@@ -43,7 +44,7 @@ Portable views choose their language from the live host locale: every locale tag
 
 In FluxDown, choose the `.fxplug` package from **Settings → Extensions → Plugins**; enable the plugin after installation.
 
-The root of the `.fxplug` package must contain `manifest.json`, `resolve.js`, `auth.js`, and `main.js`; a development install directory must also contain those files directly. `main.js` embeds a QR encoder under the MIT license, so no additional runtime dependency is required.
+The root of the `.fxplug` package and development install directory must contain `manifest.json`, `resolve.js`, `auth.js`, `main.js`, and the sidebar icon `bilibili.svg`. `main.js` embeds a QR encoder under the MIT license, so no additional runtime dependency is required.
 
 ## Configuration
 
@@ -150,7 +151,9 @@ Playback URLs are short-lived. FluxDown re-resolves them on start or resume. Hos
 
 ## Version
 
-Current version: `1.2.1`
+Current version: `1.2.2`
+
+`1.2.2`: redesigned the Bilibili activity with a sidebar icon, cover thumbnails, video metadata, append-only loading, and a compact selection toolbar. FluxDown 0.6.8 remains supported; round avatars, rounded covers, and a fixed toolbar while scrolling require a host with the corresponding rendering support.
 
 `1.2.1`: FluxDown 0.6.8 compatibility release; retains the content library, collections, media preferences, cover and XML downloads, and bilingual settings and views.
 
@@ -184,7 +187,7 @@ The runtime entry remains the root `resolve.js`; source is split by responsibili
 - `subscriptions.js`: series and UP creator subscriptions
 - `entry.js`: `resolve` and `subscribe` entry points exposed to FluxDown
 - `resources.js`: cover and original XML danmaku downloads
-- `input.js`, `library-view.js`: ID and share-text normalization, library activity view
+- `input.js`, `library-view.js`: canonical video URLs and the account browsing activity
 - `auth-view.js`: QR view state and session lifecycle
 - `qr-image.js`: sandbox PNG encoding; QR matrix uses FD's existing node-qrcode 1.5.4 encoder (`vendor/qrcode.js`, license in `vendor/LICENSE-qrcode`)
 
